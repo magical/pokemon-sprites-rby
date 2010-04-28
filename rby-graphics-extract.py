@@ -2,6 +2,14 @@
 import struct
 import io
 
+def bitflip(x, n):
+    r = 0
+    while n:
+        r = (r << 1) | (x & 1)
+        x >>= 1
+        n -= 1
+    return r
+
 table1 = [(1 << i) - 1 for i in range(16)]
 
 #table2 = [
@@ -15,8 +23,8 @@ table2 = [
     [0xf, 0xe, 0xc, 0xd, 0x8, 0x9, 0xb, 0xa, 0, 1, 3, 2, 7, 6, 4, 5],
 ]
 table2_mirrored = [
-    [bitflip(x) for x in table2[0]],
-    [bitflip(x) for x in table2[1]],
+    [bitflip(x, 4) for x in table2[0]],
+    [bitflip(x, 4) for x in table2[1]],
 ]
 
 #0 1 3 2 7 6 4 5
@@ -38,36 +46,31 @@ table2_mirrored = [
 #0 1 3 2
 #7 6 4 5
 
-def bitflip(x, n):
-    r = 0
-    while n:
-        r = (r << 1) | (x & 1)
-        x >>= 1
-        n -= 1
-    return r
 
-table3 = [bitflip(i) for i in range(16)]
+table3 = [bitflip(i, 4) for i in range(16)]
 
 def decompress(f):
+    global sizex, sizey, mode2
     ram = []
 
-    sizex = readint(bs, 4)
+    bs = bitstream(f)
+
+    sizex = readint(bs, 4) * 8
     sizey = readint(bs, 4)
     ramorder = next(bs)
 
     mode = ['rle', 'data'][next(bs)]
-    for _ in range(sizex):
-        for _ in range(sizey):
+    mode2 = 0
+    while len(ram) < 0x188 * 2 * 4:
             if mode == 'rle':
-                rle(bs, rams[0])
-                mode = 'func'
+                rle(ram, bs)
+                mode = 'data'
             elif mode == 'data':
-                data(bs, rams[0])
-                mode = 'func'
-
-    mode = next(bs)
-    if mode == 1:
-        mode = 1 + next(bs)
+                data(ram, bs)
+                mode = 'rle'
+            else:
+                assert False
+            print(hex(len(ram)), hex(0x188*4), hex(0x188 * 8))
     
     while len(ram) < 0x188 * 8:
         ram.append(0)
@@ -84,13 +87,13 @@ def decompress(f):
     else:
         assert False
 
-    if mode == 0:
+    if mode2 == 0:
         thing1(ram1)
         thing1(ram2)
-    elif mode == 1:
+    elif mode2 == 1:
         thing1(ram1)
         thing2(ram1, ram2)
-    elif mode == 2:
+    elif mode2 == 2:
         thing1(ram2)
         thing2(ram1, ram2)
 
@@ -100,13 +103,21 @@ def decompress(f):
         out.append(b)
     return bytes(out)
 
+def checkram(ram, bs):
+    global mode2
+    if len(ram) == sizex * sizey * 4:
+        print("hi")
+        mode2 = next(bs)
+        if mode2 == 1:
+            mode2 = 1 + next(bs)
+
 def bitgroups_to_bytes(bits):
     l = []
-    for i in range(0, len(bits), 4):
+    for i in range(0, len(bits)-1, 4):
         n = ((bits[i] << 6)
              | (bits[i+1] << 4)
              | (bits[i+2] << 2)
-             | (bits[i+3])
+             | (bits[i+3]))
         l.append(n)
     return bytes(l)
 
@@ -147,6 +158,7 @@ def rle(ram, bs):
 
     for i in range(n):
         ram.append(0)
+        #checkram(ram, bs)
 
 # data encodes pairs of bits
 def data(ram, bs):
@@ -156,12 +168,13 @@ def data(ram, bs):
         if bitgroup == 0:
             break
         ram.append(bitgroup)
+    #checkram(ram, bs)
 
 def thing1(ram, mirror=False):
     prev = 0
-    for y in range(sizey):
-        for x in range(sizex):
-            i = x*sizey + y
+    for x in range(sizex):
+        for y in range(sizey):
+            i = y*sizex + x
             a = ram[i] >> 4
             b = ram[i] & 0xf
             table = table2 if not mirror else table2_mirrored
@@ -171,19 +184,26 @@ def thing1(ram, mirror=False):
             prev = a
 
             bit = prev & 1 if not mirror else prev & 8
-            b = table[b]
+            b = table[bit][b]
             prev = b
 
             ram[i] = (a << 4) | b
 
-def thing2(ram1, ram2):
+def thing2(ram1, ram2, mirror=False):
     thing1(ram1)
-    if mirrored
 
-    for x in range(sizex):
-        for y in range(sizey):
-            i = x*sizey + y
-            if mirrored:
+    for y in range(sizey):
+        for x in range(sizex):
+            i = y*sizex + x
+            if mirror:
                 #XXX
                 pass
             ram1[i] ^= ram2[i]
+
+f = open("../red.gb", 'rb')
+f.seek(0x34000)
+out = decompress(f)
+from binascii import hexlify
+for i in range(sizey):
+    print(hexlify(out[i*sizex:(i+1)*sizex]))
+
