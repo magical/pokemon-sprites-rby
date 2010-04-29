@@ -255,10 +255,19 @@ def savepgm(ram, out):
             print(file=out)
 
 
+def untile(ram):
+    out = []
+    for y in range(sizey*8):
+        for x in range(sizex//8):
+            k = (y + sizey * 8 * x) * 2
+            out.append(ram[k:k+2])
+    return b''.join(out)
+
 f = open("../../red.gb", 'rb')
 f.seek(0x34000)
 #f.seek(0x34162)
 out = decompress(f)
+out = untile(out)
 savepgm(out, open("./img", "w"))
 
 from binascii import hexlify
