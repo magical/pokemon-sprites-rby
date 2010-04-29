@@ -24,10 +24,6 @@ class Decompressor:
         [0, 1, 3, 2, 7, 6, 4, 5, 0xf, 0xe, 0xc, 0xd, 8, 9, 0xb, 0xa],
         [0xf, 0xe, 0xc, 0xd, 8, 9, 0xb, 0xa, 0, 1, 3, 2, 7, 6, 4, 5],
     ]
-    table2_mirrored = [
-        [bitflip(x, 4) for x in table2[0]],
-        [bitflip(x, 4) for x in table2[1]],
-    ]
 
     table3 = [bitflip(i, 4) for i in range(16)]
 
@@ -123,21 +119,22 @@ class Decompressor:
         if mirror is None:
             mirror = self.mirror
 
-        table = self.table2 if not mirror else self.table2_mirrored
         for x in range(self.sizex):
-            prev = 0
+            bit = 0
             for y in range(self.sizey):
                 i = y*self.sizex + x
-                a = ram[i] >> 4
+                a = ram[i] >> 4 & 0xf
                 b = ram[i] & 0xf
 
-                bit = bool(prev & 1 if not mirror else prev & 8)
-                a = table[bit][a]
-                prev = a
+                a = self.table2[bit][a]
+                bit = a & 1
+                if mirror:
+                    a = self.table3[a]
 
-                bit = bool(prev & 1 if not mirror else prev & 8)
-                b = table[bit][b]
-                prev = b
+                b = self.table2[bit][b]
+                bit = b & 1
+                if mirror:
+                    b = self.table3[b]
 
                 ram[i] = (a << 4) | b
 
