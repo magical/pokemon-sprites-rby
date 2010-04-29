@@ -50,10 +50,9 @@ table2_mirrored = [
 table3 = [bitflip(i, 4) for i in range(16)]
 
 def decompress(f):
-    global sizex, sizey, mode2
-    ram = []
+    global sizex, sizey
 
-    bs = bitstream(f)
+    bs = fbitstream(f)
 
     sizex = readint(bs, 4) * 8
     sizey = readint(bs, 4)
@@ -82,12 +81,11 @@ def decompress(f):
     elif mode2 == 2:
         thing1(rams[ramorder^1])
         thing2(rams[ramorder], rams[ramorder ^ 1])
-
-    out = bytearray()
-    for a, b in zip(ram1, ram2):
-        out.append(a)
-        out.append(b)
-    return bytes(out)
+    
+    out = []
+    for a, b in zip(bitstream(ram1), bitstream(ram2)):
+        out.append(a | (b << 1))
+    return bitgroups_to_bytes(out)
 
 def fillram(ram, bs):
     size = sizex*sizey * 4
@@ -115,13 +113,24 @@ def bitgroups_to_bytes(bits):
         l.append(n)
     return bytes(l)
 
-def bitstream(f):
+def fbitstream(f):
     while 1:
         char = f.read(1)
         if not char:
             break
         byte = char[0]
 
+        yield (byte >> 7) & 1
+        yield (byte >> 6) & 1
+        yield (byte >> 5) & 1
+        yield (byte >> 4) & 1
+        yield (byte >> 3) & 1
+        yield (byte >> 2) & 1
+        yield (byte >> 1) & 1
+        yield byte & 1
+
+def bitstream(b):
+    for byte in b:
         yield (byte >> 7) & 1
         yield (byte >> 6) & 1
         yield (byte >> 5) & 1
@@ -166,13 +175,13 @@ def data(ram, bs):
         #print("d: {:02b}".format(bitgroup))
 
 def thing1(ram, mirror=False):
+    table = table2 if not mirror else table2_mirrored
     for x in range(sizex):
         prev = 0
         for y in range(sizey):
             i = y*sizex + x
             a = ram[i] >> 4
             b = ram[i] & 0xf
-            table = table2 if not mirror else table2_mirrored
 
             bit = bool(prev & 1 if not mirror else prev & 8)
             a = table[bit][a]
@@ -185,7 +194,7 @@ def thing1(ram, mirror=False):
             ram[i] = (a << 4) | b
 
 def thing2(ram1, ram2, mirror=False):
-    thing1(ram1)
+    thing1(ram1, mirror=mirror)
 
     for y in range(sizey):
         for x in range(sizex):
@@ -193,16 +202,51 @@ def thing2(ram1, ram2, mirror=False):
             if mirror:
                 #XXX
                 pass
-            ram1[i] ^= ram2[i]
+            ram2[i] ^= ram1[i]
+
+# PIL is not yet available for python 3, so we'll write out a pgm(5) file,
+# and let netpbm(1) sort it out.
+def savepam(ram, out):
+    print("P7", file=out)
+    print("HEIGHT", sizey*4, file=out)
+    print("WIDTH", sizex//2, file=out)
+    print("MAXVAL", 3, file=out)
+    print("DEPTH", 1, file=out)
+    print("TUPLETYPE", "GRAYSCALE", file=out)
+    print("ENDHDR", file=out)
+    i = 0
+    for _ in range(sizey*4):
+        for _ in range(sizex//2):
+            byte = ram[i]
+            print(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
+            i += 1
+
+def savepgm(ram, out):
+    print("P2", file=out)
+    print(sizex, sizey*8, file=out) # width, height
+    print(3, file=out) # maxval
+    i = 0
+    width = sizex // 4
+    for i in range(len(ram)):
+        byte = ram[i]
+        print(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
+        #print(3 - (byte>>6), 3 - (byte>>4 & 3), 3 - (byte >> 2 & 3), 3 - (byte & 3), end=" ", file=out)
+        i += 1
+        if i % width == 0:
+            print(file=out)
+
 
 f = open("../../red.gb", 'rb')
 f.seek(0x34000)
 out = decompress(f)
+savepgm(out, open("./img", "w"))
+
 from binascii import hexlify
 #for i in range(sizey):
     #for j in range(4):
         #row = b''.join(out[i*sizex + j*4 + k*16:i*sizex + j*4 + k*16 + 4] for k in range(4))
         #print(hexlify(row))
+
 sizex //= 8
 for i in range(sizey*4):
     row = out[i*sizex*4:(i+1)*sizex*4]
