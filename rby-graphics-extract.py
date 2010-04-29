@@ -11,129 +11,166 @@ def bitflip(x, n):
         n -= 1
     return r
 
-table1 = [(2 << i) - 1 for i in range(16)]
+class Decompressor:
+    table1 = [(2 << i) - 1 for i in range(16)]
 
-#table2 = [
-#    [0x01, 0x32, 0x76, 0x45, 0xfe, 0xcd, 0x89, 0xba],
-#    [0xfe, 0xcd, 0x89, 0xba, 0x01, 0x32, 0x76, 0x45],
-#    [0x08, 0xc4, 0xe6, 0x2a, 0xf7, 0x3b, 0x19, 0xd5],
-#    [0xf7, 0x3b, 0x19, 0xd5, 0x08, 0xc4, 0xe6, 0x2a],
-#]
-table2 = [
-    [0, 1, 3, 2, 7, 6, 4, 5, 0xf, 0xe, 0xc, 0xd, 8, 9, 0xb, 0xa],
-    [0xf, 0xe, 0xc, 0xd, 8, 9, 0xb, 0xa, 0, 1, 3, 2, 7, 6, 4, 5],
-]
-table2_mirrored = [
-    [bitflip(x, 4) for x in table2[0]],
-    [bitflip(x, 4) for x in table2[1]],
-]
+    #table2 = [
+    #    [0x01, 0x32, 0x76, 0x45, 0xfe, 0xcd, 0x89, 0xba],
+    #    [0xfe, 0xcd, 0x89, 0xba, 0x01, 0x32, 0x76, 0x45],
+    #    [0x08, 0xc4, 0xe6, 0x2a, 0xf7, 0x3b, 0x19, 0xd5],
+    #    [0xf7, 0x3b, 0x19, 0xd5, 0x08, 0xc4, 0xe6, 0x2a],
+    #]
+    table2 = [
+        [0, 1, 3, 2, 7, 6, 4, 5, 0xf, 0xe, 0xc, 0xd, 8, 9, 0xb, 0xa],
+        [0xf, 0xe, 0xc, 0xd, 8, 9, 0xb, 0xa, 0, 1, 3, 2, 7, 6, 4, 5],
+    ]
+    table2_mirrored = [
+        [bitflip(x, 4) for x in table2[0]],
+        [bitflip(x, 4) for x in table2[1]],
+    ]
 
-#0 1 3 2 7 6 4 5
-#f e c d 8 9 b a
+    table3 = [bitflip(i, 4) for i in range(16)]
 
-#0 1 3 2
-#7 6 4 5
+    tilesize = 8
 
-#0 1
-#3 2
+    def __init__(self, f):
+        self.bs = fbitstream(f)
 
-#0 1 3 2
-#7 6 4 5
-#f e c d
-#8 9 b a
+        self.sizex = readint(self.bs, 4) * self.tilesize
+        self.sizey = readint(self.bs, 4)
 
-#f e c d
-#8 9 b a
-#0 1 3 2
-#7 6 4 5
+        self.size = self.sizex * self.sizey
 
+        self.ramorder = next(self.bs)
 
-table3 = [bitflip(i, 4) for i in range(16)]
+        self.mirror = False
 
-def decompress(f):
-    global sizex, sizey
-    mirror = True
+    def decompress(self):
+        rams = [[], []]
 
-    bs = fbitstream(f)
+        r1 = self.ramorder
+        r2 = self.ramorder ^ 1
 
-    sizex = readint(bs, 4) * 8
-    sizey = readint(bs, 4)
-    ramorder = next(bs)
+        self.fillram(rams[r1])
+        mode = self.readbit()
+        if mode == 1:
+            mode = 1 + self.readbit()
+        self.fillram(rams[r2])
 
-    ram1 = []
-    ram2 = []
-    rams = [ram1, ram2]
-    fillram(rams[ramorder], bs)
-    mode2 = next(bs)
-    if mode2 == 1:
-        mode2 = 1 + next(bs)
-    fillram(rams[ramorder ^ 1], bs)
+        rams[0] = bytearray(bitgroups_to_bytes(rams[0]))
+        rams[1] = bytearray(bitgroups_to_bytes(rams[1]))
 
-    ram1 = interlaced_bitgroups_to_bytes(ram1)
-    ram1 = bytearray(ram1)
-    ram2 = interlaced_bitgroups_to_bytes(ram2)
-    ram2 = bytearray(ram2)
-    rams = [ram1, ram2]
+        if mode == 0:
+            self.thing1(rams[0])
+            self.thing1(rams[1])
+        elif mode == 1:
+            self.thing1(rams[r1])
+            self.thing2(rams[r1], rams[r2])
+        elif mode == 2:
+            self.thing1(rams[r2], mirror=False)
+            self.thing1(rams[r1])
+            self.thing2(rams[r1], rams[r2])
 
-    if mode2 == 0:
-        thing1(ram1, mirror=mirror)
-        thing1(ram2, mirror=mirror)
-    elif mode2 == 1:
-        #thing1(ram1)
-        thing2(rams[ramorder], rams[ramorder^1], mirror=mirror)
-    elif mode2 == 2:
-        thing1(rams[ramorder^1], mirror=False)
-        thing2(rams[ramorder], rams[ramorder ^ 1], mirror=mirror)
+        out = []
+        for a, b in zip(bitstream(rams[0]), bitstream(rams[1])):
+            out.append(a | (b << 1))
+            #out.append((a << 1) | b)
+        return bitgroups_to_bytes(out)
 
-    #open('dump1', 'wb').write(ram1)
-    #open('dump1', 'ab').write(ram2)
+    def fillram(self, ram):
+        mode = ['rle', 'data'][self.readbit()]
+        size = self.size * 4
+        while len(ram) < size:
+            if mode == 'rle':
+                self.rle(ram)
+                mode = 'data'
+            elif mode == 'data':
+                self.data(ram)
+                mode = 'rle'
+            else:
+                assert False
 
-    out = []
-    for a, b in zip(bitstream(ram1), bitstream(ram2)):
-        out.append(a | (b << 1))
-        #out.append((a << 1) | b)
-    return bitgroups_to_bytes(out)
+            if len(ram) > size:
+                raise ValueError(size, len(ram))
+        ram[:] = self._deinterlace_bitgroups(ram)
 
-def fillram(ram, bs):
-    size = sizex*sizey * 4
-    mode = ['rle', 'data'][next(bs)]
-    while len(ram) < size:
-        if mode == 'rle':
-            rle(ram, bs)
-            mode = 'data'
-        elif mode == 'data':
-            data(ram, bs)
-            mode = 'rle'
-        else:
-            assert False
-        #print(hex(len(ram)))
-        if len(ram) > size:
-            raise ValueError(size, len(ram))
+    # the rle segment encodes chunks of zeros
+    def rle(self, ram):
+        # count bits until we find a 0
+        i = 0
+        while self.readbit():
+            i += 1
 
-def bitgroups_to_bytes(bits):
-    l = []
-    for i in range(0, len(bits)-3, 4):
-        n = ((bits[i] << 6)
-             | (bits[i+1] << 4)
-             | (bits[i+2] << 2)
-             | (bits[i+3]))
-        l.append(n)
-    return bytes(l)
+        n = self.table1[i]
+        a = self.readint(i+1)
+        n += a
 
-def interlaced_bitgroups_to_bytes(bits):
-    l = []
-    for y in range(sizey):
-        for x in range(sizex):
-            n = 0
-            i = 4 * y * sizex + x
-            for j in range(4):
-                if j:
-                    i += sizex
-                #print(i, k)
-                n <<= 2
-                n |= bits[i]
-            l.append(n)
-    return bytes(l)
+        #print(i, a, n)
+
+        for i in range(n):
+            ram.append(0)
+
+    # data encodes pairs of bits
+    def data(self, ram):
+        while 1:
+            bitgroup = self.readint(2)
+            # if we encounter a pair of 0 bits, we're done
+            if bitgroup == 0:
+                break
+            ram.append(bitgroup)
+
+    def thing1(self, ram, mirror=None):
+        if mirror is None:
+            mirror = self.mirror
+
+        table = self.table2 if not mirror else self.table2_mirrored
+        for x in range(self.sizex):
+            prev = 0
+            for y in range(self.sizey):
+                i = y*self.sizex + x
+                a = ram[i] >> 4
+                b = ram[i] & 0xf
+
+                bit = bool(prev & 1 if not mirror else prev & 8)
+                a = table[bit][a]
+                prev = a
+
+                bit = bool(prev & 1 if not mirror else prev & 8)
+                b = table[bit][b]
+                prev = b
+
+                ram[i] = (a << 4) | b
+
+    def thing2(self, ram1, ram2, mirror=None):
+        if mirror is None:
+            mirror = self.mirror
+
+        for i in range(len(ram2)):
+            if mirror:
+                a = ram2[i] >> 4
+                b = ram2[i] & 0xf
+                a = self.table3[a]
+                b = self.table3[b]
+                ram2[i] = a << 4 | b
+
+            ram2[i] ^= ram1[i]
+
+    def _deinterlace_bitgroups(self, bits):
+        l = []
+        for y in range(self.sizey):
+            for x in range(self.sizex):
+                i = 4 * y * self.sizex + x
+                for j in range(4):
+                    l.append(bits[i])
+                    i += self.sizex
+        return l
+
+    def readbit(self):
+        return next(self.bs)
+
+    def readint(self, n):
+        return readint(self.bs, n)
+
 
 def fbitstream(f):
     while 1:
@@ -170,63 +207,15 @@ def readint(bs, count):
         count -= 1
     return n
 
-# the rle segment encodes chunks of zeros
-def rle(ram, bs):
-    # count bits until we find a 0
-    i = 0
-    while next(bs):
-        i += 1
-    
-    n = table1[i]
-    a = readint(bs, i+1)
-    n += a
-
-    #print(i, a, n)
-
-    for i in range(n):
-        ram.append(0)
-
-# data encodes pairs of bits
-def data(ram, bs):
-    while 1:
-        bitgroup = readint(bs, 2)
-        # if we encounter a pair of 0 bits, we're done
-        if bitgroup == 0:
-            break
-        ram.append(bitgroup)
-        #print("d: {:02b}".format(bitgroup))
-
-def thing1(ram, mirror=False):
-    table = table2 if not mirror else table2_mirrored
-    for x in range(sizex):
-        prev = 0
-        for y in range(sizey):
-            i = y*sizex + x
-            a = ram[i] >> 4
-            b = ram[i] & 0xf
-
-            bit = bool(prev & 1 if not mirror else prev & 8)
-            a = table[bit][a]
-            prev = a
-
-            bit = bool(prev & 1 if not mirror else prev & 8)
-            b = table[bit][b]
-            prev = b
-
-            ram[i] = (a << 4) | b
-
-def thing2(ram1, ram2, mirror=False):
-    thing1(ram1, mirror=mirror)
-
-    for i in range(sizey * sizex):
-        if mirror:
-            a = ram2[i] >> 4
-            b = ram2[i] & 0xf
-            a = table3[a]
-            b = table3[b]
-            ram2[i] = a << 4 | b
-
-        ram2[i] ^= ram1[i]
+def bitgroups_to_bytes(bits):
+    l = []
+    for i in range(0, len(bits)-3, 4):
+        n = ((bits[i] << 6)
+             | (bits[i+1] << 4)
+             | (bits[i+2] << 2)
+             | (bits[i+3]))
+        l.append(n)
+    return bytes(l)
 
 # PIL is not yet available for python 3, so we'll write out a pgm(5) file,
 # and let netpbm(1) sort it out.
@@ -245,12 +234,12 @@ def savepam(ram, out):
             print(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
             i += 1
 
-def savepgm(ram, out):
+def savepgm(dcmp, ram, out):
     print("P2", file=out)
-    print(sizex, sizey*8, file=out) # width, height
+    print(dcmp.sizex, dcmp.sizey*8, file=out) # width, height
     print(3, file=out) # maxval
     i = 0
-    width = sizex // 4
+    width = dcmp.sizex // 4
     for i in range(len(ram)):
         byte = ram[i]
         #print(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
@@ -261,13 +250,14 @@ def savepgm(ram, out):
             print(file=out)
 
 
-def untile(ram):
+def untile(self, ram):
     out = []
-    for y in range(sizey*8):
-        for x in range(sizex//8):
-            k = (y + sizey * 8 * x) * 2
+    for y in range(self.sizey*8):
+        for x in range(self.sizex//8):
+            k = (y + self.sizey * 8 * x) * 2
             out.append(ram[k:k+2])
     return b''.join(out)
+
 def untile_mirror(ram):
     out = []
     for y in range(sizey*8):
@@ -279,7 +269,7 @@ def untile_mirror(ram):
 f = open("../../red.gb", 'rb')
 f.seek(0x34000)
 #f.seek(0x34162)
-out = decompress(f)
-out = mirror(out)
+dcmp = Decompressor(f)
+out = untile(dcmp, dcmp.decompress())
 #out = untile_mirror(out)
-savepgm(out, sys.stdout)
+savepgm(dcmp, out, sys.stdout)
