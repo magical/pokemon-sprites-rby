@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import struct
 import io
+import sys
 
 def bitflip(x, n):
     r = 0
@@ -51,6 +52,7 @@ table3 = [bitflip(i, 4) for i in range(16)]
 
 def decompress(f):
     global sizex, sizey
+    mirror = True
 
     bs = fbitstream(f)
 
@@ -74,14 +76,14 @@ def decompress(f):
     rams = [ram1, ram2]
 
     if mode2 == 0:
-        thing1(ram1)
-        thing1(ram2)
+        thing1(ram1, mirror=mirror)
+        thing1(ram2, mirror=mirror)
     elif mode2 == 1:
         #thing1(ram1)
-        thing2(rams[ramorder], rams[ramorder^1])
+        thing2(rams[ramorder], rams[ramorder^1], mirror=mirror)
     elif mode2 == 2:
-        thing1(rams[ramorder^1])
-        thing2(rams[ramorder], rams[ramorder ^ 1])
+        thing1(rams[ramorder^1], mirror=False)
+        thing2(rams[ramorder], rams[ramorder ^ 1], mirror=mirror)
 
     #open('dump1', 'wb').write(ram1)
     #open('dump1', 'ab').write(ram2)
@@ -89,6 +91,7 @@ def decompress(f):
     out = []
     for a, b in zip(bitstream(ram1), bitstream(ram2)):
         out.append(a | (b << 1))
+        #out.append((a << 1) | b)
     return bitgroups_to_bytes(out)
 
 def fillram(ram, bs):
@@ -215,13 +218,15 @@ def thing1(ram, mirror=False):
 def thing2(ram1, ram2, mirror=False):
     thing1(ram1, mirror=mirror)
 
-    for y in range(sizey):
-        for x in range(sizex):
-            i = y*sizex + x
-            if mirror:
-                #XXX
-                pass
-            ram2[i] ^= ram1[i]
+    for i in range(sizey * sizex):
+        if mirror:
+            a = ram2[i] >> 4
+            b = ram2[i] & 0xf
+            a = table3[a]
+            b = table3[b]
+            ram2[i] = a << 4 | b
+
+        ram2[i] ^= ram1[i]
 
 # PIL is not yet available for python 3, so we'll write out a pgm(5) file,
 # and let netpbm(1) sort it out.
@@ -248,8 +253,9 @@ def savepgm(ram, out):
     width = sizex // 4
     for i in range(len(ram)):
         byte = ram[i]
-        print(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
-        #print(3 - (byte>>6), 3 - (byte>>4 & 3), 3 - (byte >> 2 & 3), 3 - (byte & 3), end=" ", file=out)
+        #print(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
+        print(3 - (byte>>6), 3 - (byte>>4 & 3), 3 - (byte >> 2 & 3), 3 - (byte & 3), end=" ", file=out)
+        #print(3 - (byte & 3), 3 - (byte>>2 & 3), 3 - (byte >> 4 & 3), 3 - (byte >> 6), end=" ", file=out)
         i += 1
         if i % width == 0:
             print(file=out)
@@ -262,22 +268,18 @@ def untile(ram):
             k = (y + sizey * 8 * x) * 2
             out.append(ram[k:k+2])
     return b''.join(out)
+def untile_mirror(ram):
+    out = []
+    for y in range(sizey*8):
+        for x in reversed(range(sizex//8)):
+            k = (y + sizey * 8 * x) * 2
+            out.append(ram[k:k+2])
+    return b''.join(out)
 
 f = open("../../red.gb", 'rb')
 f.seek(0x34000)
 #f.seek(0x34162)
 out = decompress(f)
-out = untile(out)
-savepgm(out, open("./img", "w"))
-
-from binascii import hexlify
-#for i in range(sizey):
-    #for j in range(4):
-        #row = b''.join(out[i*sizex + j*4 + k*16:i*sizex + j*4 + k*16 + 4] for k in range(4))
-        #print(hexlify(row))
-
-sizex //= 8
-for i in range(sizey*4):
-    row = out[i*sizex*4:(i+1)*sizex*4]
-    print(hexlify(row))
-
+out = mirror(out)
+#out = untile_mirror(out)
+savepgm(out, sys.stdout)
