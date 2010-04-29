@@ -67,21 +67,25 @@ def decompress(f):
         mode2 = 1 + next(bs)
     fillram(rams[ramorder ^ 1], bs)
 
-    ram1 = bitgroups_to_bytes(ram1)
+    ram1 = interlaced_bitgroups_to_bytes(ram1)
     ram1 = bytearray(ram1)
-    ram2 = bitgroups_to_bytes(ram2)
+    ram2 = interlaced_bitgroups_to_bytes(ram2)
     ram2 = bytearray(ram2)
+    rams = [ram1, ram2]
 
     if mode2 == 0:
         thing1(ram1)
         thing1(ram2)
     elif mode2 == 1:
         #thing1(ram1)
-        thing2(ram1, ram2)
+        thing2(rams[ramorder], rams[ramorder^1])
     elif mode2 == 2:
         thing1(rams[ramorder^1])
         thing2(rams[ramorder], rams[ramorder ^ 1])
-    
+
+    #open('dump1', 'wb').write(ram1)
+    #open('dump1', 'ab').write(ram2)
+
     out = []
     for a, b in zip(bitstream(ram1), bitstream(ram2)):
         out.append(a | (b << 1))
@@ -111,6 +115,21 @@ def bitgroups_to_bytes(bits):
              | (bits[i+2] << 2)
              | (bits[i+3]))
         l.append(n)
+    return bytes(l)
+
+def interlaced_bitgroups_to_bytes(bits):
+    l = []
+    for y in range(sizey):
+        for x in range(sizex):
+            n = 0
+            i = 4 * y * sizex + x
+            for j in range(4):
+                if j:
+                    i += sizex
+                #print(i, k)
+                n <<= 2
+                n |= bits[i]
+            l.append(n)
     return bytes(l)
 
 def fbitstream(f):
@@ -238,6 +257,7 @@ def savepgm(ram, out):
 
 f = open("../../red.gb", 'rb')
 f.seek(0x34000)
+#f.seek(0x34162)
 out = decompress(f)
 savepgm(out, open("./img", "w"))
 
