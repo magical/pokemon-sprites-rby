@@ -317,11 +317,17 @@ def decompress(f, offset=None, mirror=False):
 BASE_STATS_OFFSET = 0x383de
 MEW_OFFSET = 0x425b
 ORDER_OFFSET = 0x41024
+ORDER_OFFSET_Y = 0x410b1
 ORDER_LENGTH = 0xbe
+
+#palette offsets
+# red: 0x725c9
+# yellow: 0x72922
 
 internal_ids = {}
 def read_pokedex_order(rom):
-    rom.seek(ORDER_OFFSET)
+    offset = ORDER_OFFSET_Y if version == 'yellow' else ORDER_OFFSET
+    rom.seek(offset)
     order = array("B", rom.read(ORDER_LENGTH))
     for i in range(1, 151+1):
         internal_ids[i] = order.index(i) + 1
@@ -331,8 +337,8 @@ def get_internal_id(poke):
 
 def get_bank(poke):
     internal_id = get_internal_id(poke)
-    if internal_id == 0x15:
-        return 1
+    if version in ('red', 'blue') and internal_id == 0x15:
+        return 0x1
     elif internal_id == 0xb6:
         return 0xb
     elif internal_id < 0x1f:
@@ -348,8 +354,10 @@ def get_bank(poke):
 
 def get_offset(rom, poke, sprite='front'):
     bank = get_bank(poke)
-    if poke == 151:
+    if version in ('red', 'blue') and poke == 151:
         rom.seek(MEW_OFFSET)
+        #rom.seek(BASE_STATS_OFFSET)
+        #rom.seek((poke - 1) * 28, SEEK_CUR)
     else:
         rom.seek(BASE_STATS_OFFSET)
         rom.seek((poke - 1) * 28, SEEK_CUR)
@@ -366,14 +374,35 @@ def get_offset(rom, poke, sprite='front'):
 
     return ((bank - 1) << 14) + offset
 
+def get_version(rom):
+    rom.seek(0x134)
+    title = rom.read(16).rstrip(b"\x00\x80")
+    if title == b"POKEMON RED":
+        return 'red'
+    elif title == b"POKEMON BLUE":
+        return 'blue'
+    elif title == b"POKEMON YELLOW":
+        return 'yellow'
 
-def extract_sprite(rom, poke, sprite='front'):
+    raise ValueError("Unknown game", title)
+
+
+def extract_sprite(rom, poke, sprite='front', mirror=False):
     offset = get_offset(rom, poke, sprite=sprite)
-    print(hex(offset), file=sys.stderr)
-    img = decompress(rom, offset)
+    #print(hex(offset), file=sys.stderr)
+    img = decompress(rom, offset, mirror=mirror)
     return img
 
-f = open("../../red.gb", 'rb')
+rompath = sys.argv[1]
+pokemon = int(sys.argv[2])
+try:
+    sprite = sys.argv[3]
+except LookupError:
+    sprite = 'front'
+
+f = open(rompath, 'rb')
+version = get_version(f)
 read_pokedex_order(f)
-img = extract_sprite(f, 151)
+img = extract_sprite(f, pokemon, sprite=sprite)
 img.save_pgm(sys.stdout)
+f.close()
