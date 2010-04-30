@@ -32,8 +32,8 @@ class Decompressor:
     def __init__(self, f, mirror=False):
         self.bs = fbitstream(f)
 
-        self.sizex = readint(self.bs, 4) * self.tilesize
-        self.sizey = readint(self.bs, 4)
+        self.sizex = self._readint(4) * self.tilesize
+        self.sizey = self._readint(4)
 
         self.size = self.sizex * self.sizey
 
@@ -41,47 +41,84 @@ class Decompressor:
 
         self.mirror = mirror
 
+        self.data = None
+
     def decompress(self):
         rams = [[], []]
 
         r1 = self.ramorder
         r2 = self.ramorder ^ 1
 
-        self.fillram(rams[r1])
-        mode = self.readbit()
+        self._fillram(rams[r1])
+        mode = self._readbit()
         if mode == 1:
-            mode = 1 + self.readbit()
-        self.fillram(rams[r2])
+            mode = 1 + self._readbit()
+        self._fillram(rams[r2])
 
         rams[0] = bytearray(bitgroups_to_bytes(rams[0]))
         rams[1] = bytearray(bitgroups_to_bytes(rams[1]))
 
         if mode == 0:
-            self.thing1(rams[0])
-            self.thing1(rams[1])
+            self._thing1(rams[0])
+            self._thing1(rams[1])
         elif mode == 1:
-            self.thing1(rams[r1])
-            self.thing2(rams[r1], rams[r2])
+            self._thing1(rams[r1])
+            self._thing2(rams[r1], rams[r2])
         elif mode == 2:
-            self.thing1(rams[r2], mirror=False)
-            self.thing1(rams[r1])
-            self.thing2(rams[r1], rams[r2])
+            self._thing1(rams[r2], mirror=False)
+            self._thing1(rams[r1])
+            self._thing2(rams[r1], rams[r2])
 
-        out = []
+        data = []
         for a, b in zip(bitstream(rams[0]), bitstream(rams[1])):
-            out.append(a | (b << 1))
-            #out.append((a << 1) | b)
-        return bitgroups_to_bytes(out)
+            data.append(a | (b << 1))
 
-    def fillram(self, ram):
-        mode = ['rle', 'data'][self.readbit()]
+        self.data = bitgroups_to_bytes(data)
+
+    def untile(self, mirror=None):
+        if mirror is None:
+            mirror = self.mirror
+
+        ram = self.data
+        out = []
+        sizey = self.sizey * self.tilesize
+        sizex = self.sizex // self.tilesize
+        if not mirror:
+            for y in range(sizey):
+                for x in range(sizex):
+                    k = (y + sizey * x) * 2
+                    out.append(ram[k])
+                    out.append(ram[k+1])
+        else:
+            for y in range(sizey):
+                for x in reversed(range(sizex)):
+                    k = (y + sizey * x) * 2
+                    out.append(ram[k+1])
+                    out.append(ram[k])
+        return bytes(out)
+
+    def to_image(self):
+        ram = self.untile()
+        bs = bitstream(ram)
+        data = []
+        try:
+            while 1:
+                data.append(3 - readint(bs, 2))
+        except StopIteration:
+            pass
+
+        img = Image((self.sizex, self.sizey * self.tilesize), data)
+        return img
+
+    def _fillram(self, ram):
+        mode = ['rle', 'data'][self._readbit()]
         size = self.size * 4
         while len(ram) < size:
             if mode == 'rle':
-                self.rle(ram)
+                self._read_rle_chunk(ram)
                 mode = 'data'
             elif mode == 'data':
-                self.data(ram)
+                self._read_data_chunk(ram)
                 mode = 'rle'
             else:
                 assert False
@@ -90,15 +127,16 @@ class Decompressor:
                 raise ValueError(size, len(ram))
         ram[:] = self._deinterlace_bitgroups(ram)
 
-    # the rle segment encodes chunks of zeros
-    def rle(self, ram):
+    def _read_rle_chunk(self, ram):
+        """read a run-length-encoded chunk of zeros from self.bs into `ram`"""
+
         # count bits until we find a 0
         i = 0
-        while self.readbit():
+        while self._readbit():
             i += 1
 
         n = self.table1[i]
-        a = self.readint(i+1)
+        a = self._readint(i+1)
         n += a
 
         #print(i, a, n)
@@ -106,16 +144,16 @@ class Decompressor:
         for i in range(n):
             ram.append(0)
 
-    # data encodes pairs of bits
-    def data(self, ram):
+    def _read_data_chunk(self, ram):
+        """read pairs of bits into `ram`"""
         while 1:
-            bitgroup = self.readint(2)
+            bitgroup = self._readint(2)
             # if we encounter a pair of 0 bits, we're done
             if bitgroup == 0:
                 break
             ram.append(bitgroup)
 
-    def thing1(self, ram, mirror=None):
+    def _thing1(self, ram, mirror=None):
         if mirror is None:
             mirror = self.mirror
 
@@ -138,7 +176,7 @@ class Decompressor:
 
                 ram[i] = (a << 4) | b
 
-    def thing2(self, ram1, ram2, mirror=None):
+    def _thing2(self, ram1, ram2, mirror=None):
         if mirror is None:
             mirror = self.mirror
 
@@ -162,11 +200,57 @@ class Decompressor:
                     i += self.sizex
         return l
 
-    def readbit(self):
+    def _readbit(self):
+        """Read a single bit."""
         return next(self.bs)
 
-    def readint(self, n):
-        return readint(self.bs, n)
+    def _readint(self, count):
+        """Read an integer `count` bits in length."""
+        return readint(self.bs, count)
+
+class Image:
+    def __init__(self, size, data=None):
+        self.sizex, self.sizey = size
+        self.data = data
+
+    # PIL is not yet available for python 3, so we'll write out a pgm(5) file,
+    # and let netpbm(1) sort it out.
+    def save_pam(self, out):
+        def write(*args, **kw):
+            print(*args, file=out, **kw)
+        write("P7")
+        write("HEIGHT", sizey*4)
+        write("WIDTH", sizex//2)
+        write("MAXVAL", 3)
+        write("DEPTH", 1)
+        write("TUPLETYPE", "GRAYSCALE")
+        write("ENDHDR")
+        i = 0
+        for _ in range(self.sizey):
+            for _ in range(self.sizex):
+                write(self.data[i])
+                i += 1
+
+    def save_pgm(self, out):
+        def write(*args, **kw):
+            print(*args, file=out, **kw)
+        write("P2")
+        write(self.sizex, self.sizey) # width, height
+        write(3) # maxval
+        i = 0
+        width = self.sizex
+        for i in range(len(self.data)):
+            write(self.data[i])
+            """
+            byte = ram[i]
+            #write(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
+            write(3 - (byte>>6), 3 - (byte>>4 & 3), 3 - (byte >> 2 & 3), 3 - (byte & 3), end=" ")
+            #write(3 - (byte & 3), 3 - (byte>>2 & 3), 3 - (byte >> 4 & 3), 3 - (byte >> 6), end=" ", file=out)
+            """
+            i += 1
+            if i % width == 0:
+                write()
+
 
 
 def fbitstream(f):
@@ -197,6 +281,7 @@ def bitstream(b):
         yield byte & 1
 
 def readint(bs, count):
+    """Read an integer `count` bits long from `bs`."""
     n = 0
     while count:
         n <<= 1
@@ -214,60 +299,19 @@ def bitgroups_to_bytes(bits):
         l.append(n)
     return bytes(l)
 
-# PIL is not yet available for python 3, so we'll write out a pgm(5) file,
-# and let netpbm(1) sort it out.
-def savepam(ram, out):
-    print("P7", file=out)
-    print("HEIGHT", sizey*4, file=out)
-    print("WIDTH", sizex//2, file=out)
-    print("MAXVAL", 3, file=out)
-    print("DEPTH", 1, file=out)
-    print("TUPLETYPE", "GRAYSCALE", file=out)
-    print("ENDHDR", file=out)
-    i = 0
-    for _ in range(sizey*4):
-        for _ in range(sizex//2):
-            byte = ram[i]
-            print(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
-            i += 1
+def decompress(f, offset=None, mirror=False):
+    if offset is not None:
+        f.seek(offset)
 
-def savepgm(dcmp, ram, out):
-    print("P2", file=out)
-    print(dcmp.sizex, dcmp.sizey*8, file=out) # width, height
-    print(3, file=out) # maxval
-    i = 0
-    width = dcmp.sizex // 4
-    for i in range(len(ram)):
-        byte = ram[i]
-        #print(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
-        print(3 - (byte>>6), 3 - (byte>>4 & 3), 3 - (byte >> 2 & 3), 3 - (byte & 3), end=" ", file=out)
-        #print(3 - (byte & 3), 3 - (byte>>2 & 3), 3 - (byte >> 4 & 3), 3 - (byte >> 6), end=" ", file=out)
-        i += 1
-        if i % width == 0:
-            print(file=out)
+    dcmp = Decompressor(f, mirror=mirror)
+    dcmp.decompress()
+    img = dcmp.to_image()
+    return img
 
-
-def untile(self, ram):
-    out = []
-    for y in range(self.sizey*8):
-        for x in range(self.sizex//8):
-            k = (y + self.sizey * 8 * x) * 2
-            out.append(ram[k:k+2])
-    return b''.join(out)
-
-def untile_mirror(self, ram):
-    out = []
-    for y in range(self.sizey*8):
-        for x in reversed(range(self.sizex//8)):
-            k = (y + self.sizey * 8 * x) * 2
-            out.append(ram[k+1])
-            out.append(ram[k])
-    return bytes(out)
 
 f = open("../../red.gb", 'rb')
-f.seek(0x34000)
-#f.seek(0x34162)
-dcmp = Decompressor(f)
-out = untile(dcmp, dcmp.decompress())
-#out = untile_mirror(dcmp, dcmp.decompress())
-savepgm(dcmp, out, sys.stdout)
+#offset = 0x34000
+#offset = 0x34162
+#offset = 0x340e5
+img = decompress(f, offset)
+img.save_pgm(sys.stdout)
