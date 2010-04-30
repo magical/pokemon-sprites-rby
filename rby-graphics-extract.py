@@ -29,7 +29,7 @@ class Decompressor:
 
     tilesize = 8
 
-    def __init__(self, f):
+    def __init__(self, f, mirror=False):
         self.bs = fbitstream(f)
 
         self.sizex = readint(self.bs, 4) * self.tilesize
@@ -39,7 +39,7 @@ class Decompressor:
 
         self.ramorder = next(self.bs)
 
-        self.mirror = False
+        self.mirror = mirror
 
     def decompress(self):
         rams = [[], []]
@@ -255,18 +255,19 @@ def untile(self, ram):
             out.append(ram[k:k+2])
     return b''.join(out)
 
-def untile_mirror(ram):
+def untile_mirror(self, ram):
     out = []
-    for y in range(sizey*8):
-        for x in reversed(range(sizex//8)):
-            k = (y + sizey * 8 * x) * 2
-            out.append(ram[k:k+2])
-    return b''.join(out)
+    for y in range(self.sizey*8):
+        for x in reversed(range(self.sizex//8)):
+            k = (y + self.sizey * 8 * x) * 2
+            out.append(ram[k+1])
+            out.append(ram[k])
+    return bytes(out)
 
 f = open("../../red.gb", 'rb')
 f.seek(0x34000)
 #f.seek(0x34162)
 dcmp = Decompressor(f)
 out = untile(dcmp, dcmp.decompress())
-#out = untile_mirror(out)
+#out = untile_mirror(dcmp, dcmp.decompress())
 savepgm(dcmp, out, sys.stdout)
