@@ -121,13 +121,13 @@ class Decompressor:
                 self._read_rle_chunk(ram)
                 mode = 'data'
             elif mode == 'data':
-                self._read_data_chunk(ram)
+                self._read_data_chunk(ram, size)
                 mode = 'rle'
             else:
                 assert False
 
-            if len(ram) > size:
-                raise ValueError(size, len(ram))
+        if len(ram) > size:
+            raise ValueError(size, len(ram))
         ram[:] = self._deinterlace_bitgroups(ram)
 
     def _read_rle_chunk(self, ram):
@@ -147,14 +147,19 @@ class Decompressor:
         for i in range(n):
             ram.append(0)
 
-    def _read_data_chunk(self, ram):
-        """read pairs of bits into `ram`"""
+    def _read_data_chunk(self, ram, size):
+        """Read pairs of bits into `ram`"""
         while 1:
             bitgroup = self._readint(2)
             # if we encounter a pair of 0 bits, we're done
             if bitgroup == 0:
                 break
             ram.append(bitgroup)
+
+            # stop once we have enough data.
+            # only matters for a handful of pokemon.
+            if size <= len(ram):
+                break
 
     def _thing1(self, ram, mirror=None):
         if mirror is None:
