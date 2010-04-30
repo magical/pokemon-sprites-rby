@@ -227,17 +227,15 @@ class Image:
         def write(*args, **kw):
             print(*args, file=out, **kw)
         write("P7")
-        write("HEIGHT", sizey*4)
-        write("WIDTH", sizex//2)
+        write("HEIGHT", self.sizey)
+        write("WIDTH", self.sizex)
         write("MAXVAL", 3)
         write("DEPTH", 1)
-        write("TUPLETYPE", "GRAYSCALE")
+        write("TUPLTYPE", "GRAYSCALE")
         write("ENDHDR")
         i = 0
-        for _ in range(self.sizey):
-            for _ in range(self.sizex):
-                write(self.data[i])
-                i += 1
+        out.flush()
+        out.buffer.write(bytes(self.data))
 
     def save_pgm(self, out):
         def write(*args, **kw):
@@ -335,7 +333,7 @@ def get_bank(poke):
     internal_id = get_internal_id(poke)
     if internal_id == 0x15:
         return 1
-    elif internal_id == 0x15:
+    elif internal_id == 0xb6:
         return 0xb
     elif internal_id < 0x1f:
         return 0x9
