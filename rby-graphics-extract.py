@@ -2,6 +2,9 @@
 import struct
 import io
 import sys
+from os import SEEK_CUR
+from struct import unpack
+from array import array
 
 def bitflip(x, n):
     r = 0
@@ -240,7 +243,7 @@ class Image:
         i = 0
         width = self.sizex
         for i in range(len(self.data)):
-            write(self.data[i])
+            write(self.data[i], end=" ")
             """
             byte = ram[i]
             #write(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
@@ -308,10 +311,66 @@ def decompress(f, offset=None, mirror=False):
     img = dcmp.to_image()
     return img
 
+BASE_STATS_OFFSET = 0x383de
+MEW_OFFSET = 0x425b
+ORDER_OFFSET = 0x41024
+ORDER_LENGTH = 0xbe
+
+internal_ids = {}
+def read_pokedex_order(rom):
+    rom.seek(ORDER_OFFSET)
+    order = array("B", rom.read(ORDER_LENGTH))
+    for i in range(1, 151+1):
+        internal_ids[i] = order.index(i) + 1
+
+def get_internal_id(poke):
+    return internal_ids[poke]
+
+def get_bank(poke):
+    internal_id = get_internal_id(poke)
+    if internal_id == 0x15:
+        return 1
+    elif internal_id == 0x15:
+        return 0xb
+    elif internal_id < 0x1f:
+        return 0x9
+    elif internal_id < 0x4a:
+        return 0xa
+    elif internal_id < 0x74:
+        return 0xb
+    elif internal_id < 0x99:
+        return 0xc
+    else:
+        return 0xd
+
+def get_offset(rom, poke, sprite='front'):
+    bank = get_bank(poke)
+    if poke == 151:
+        rom.seek(MEW_OFFSET)
+    else:
+        rom.seek(BASE_STATS_OFFSET)
+        rom.seek((poke - 1) * 28, SEEK_CUR)
+    rom.seek(11, SEEK_CUR)
+
+    offsets = unpack("<HH", rom.read(4))
+
+    if sprite == 'front':
+        offset = offsets[0]
+    elif sprite == 'back':
+        offset = offsets[1]
+    else:
+        raise ValueError(sprite)
+
+    return ((bank - 1) << 14) + offset
+
+
+def extract_sprite(rom, poke, sprite='front'):
+    offset = get_offset(rom, poke, sprite=sprite)
+    print(hex(offset), file=sys.stderr)
+    img = decompress(rom, offset)
+    return img
 
 f = open("../../red.gb", 'rb')
-#offset = 0x34000
-#offset = 0x34162
-#offset = 0x340e5
-img = decompress(f, offset)
+read_pokedex_order(f)
+img = extract_sprite(f, 151)
 img.save_pgm(sys.stdout)
