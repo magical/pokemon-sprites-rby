@@ -5,6 +5,7 @@ import sys
 from os import SEEK_CUR
 from struct import pack, unpack
 from array import array
+from subprocess import Popen, PIPE
 
 def bitflip(x, n):
     r = 0
@@ -239,6 +240,19 @@ class Image:
         out.buffer.write(bytes(self.data))
 
     def save_pgm(self, out):
+        if 'b' in out.mode:
+            return self._save_pgm(out)
+        else:
+            return self._save_plain_pgm(out)
+
+    def _save_pgm(self, out):
+        out.write("P5\n{:d} {:d}\n{:d}\n"
+                      .format(self.sizex, self.sizey, 3)
+                      .encode())
+        for byte in self.data:
+            out.write(pack("<B", (3 - byte)))
+
+    def _save_plain_pgm(self, out):
         def write(*args, **kw):
             print(*args, file=out, **kw)
         write("P2")
@@ -252,28 +266,54 @@ class Image:
             if i % width == 0:
                 write()
 
-    def save_pnm(self, out, palette=None):
+    def save_ppm(self, out, *args, **kw):
+        if 'b' in out.mode:
+            return self._save_ppm(out, *args, **kw)
+        else:
+            return self._save_plain_ppm(out, *args, **kw)
+
+    def _save_ppm(self, out, palette=None):
         if palette is None:
             palette = self.palette
+        out.write("P6\n{:d} {:d}\n{:d}\n"
+                      .format(self.sizex, self.sizey, 31)
+                      .encode())
+        for byte in self.data:
+            out.write(pack("<BBB", *palette[byte]))
+
+    def _save_plain_ppm(self, out, palette=None):
+        if palette is None:
+            palette = self.palette
+
         def write(*args, **kw):
             print(*args, file=out, **kw)
-        write("P6")
+        write("P3") # magic number
         write(self.sizex, self.sizey) # width, height
-        write(31) # maxval
-        out.flush()
-        i = 0
+        write(31) # maxval. XXX don't hardcode this
+
         width = self.sizex
-        for i in range(len(self.data)):
-            out.buffer.write(pack("<BBB", *palette[self.data[i]]))
-            i += 1
-            if i % width == 0:
+        for i, byte in enumerate(self.data):
+            write("{:2d} {:2d} {:2d}".format(*palette[byte]), end="  ")
+            if (i + 1) % width == 0:
                 write()
 
-    def save_img(self, *args, **kw):
-        if self.palette:
-            return self.save_pnm(*args, **kw)
+    def save_pnm(self, *args, palette=None, **kw):
+        if palette is None:
+            palette = self.palette
+
+        if palette:
+            return self.save_ppm(*args, palette=palette, **kw)
         else:
             return self.save_pgm(*args, **kw)
+
+    def save_png(self, out, palette=None):
+        if palette is None:
+            palette = self.palette
+        p = Popen("pnmtopng", stdin=PIPE, stdout=out)
+        self.save_pnm(p.stdin, palette=palette)
+        p.stdin.close()
+        p.wait()
+
 
 class Palette:
     def __init__(self, colors):
@@ -444,6 +484,7 @@ def extract_sprite(rom, poke, sprite='front', mirror=False):
     return img
 
 
+
 rompath = sys.argv[1]
 pokemon = int(sys.argv[2])
 try:
@@ -457,5 +498,6 @@ read_pokedex_order(f)
 read_palettes(f)
 
 img = extract_sprite(f, pokemon, sprite=sprite)
-img.save_img(sys.stdout)
+img.save_png(sys.stdout)
+#img.save_ppm(sys.stdout)
 f.close()
