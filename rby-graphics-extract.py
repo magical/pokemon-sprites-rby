@@ -3,7 +3,7 @@ import struct
 import io
 import sys
 from os import SEEK_CUR
-from struct import unpack
+from struct import pack, unpack
 from array import array
 
 def bitflip(x, n):
@@ -106,7 +106,7 @@ class Decompressor:
         data = []
         try:
             while 1:
-                data.append(3 - readint(bs, 2))
+                data.append(readint(bs, 2))
         except StopIteration:
             pass
 
@@ -220,6 +220,7 @@ class Image:
     def __init__(self, size, data=None):
         self.sizex, self.sizey = size
         self.data = data
+        self.palette = None
 
     # PIL is not yet available for python 3, so we'll write out a pgm(5) file,
     # and let netpbm(1) sort it out.
@@ -246,17 +247,53 @@ class Image:
         i = 0
         width = self.sizex
         for i in range(len(self.data)):
-            write(self.data[i], end=" ")
-            """
-            byte = ram[i]
-            #write(byte>>6, byte>>4 & 3, byte >> 2 & 3, byte & 3, end=" ", file=out)
-            write(3 - (byte>>6), 3 - (byte>>4 & 3), 3 - (byte >> 2 & 3), 3 - (byte & 3), end=" ")
-            #write(3 - (byte & 3), 3 - (byte>>2 & 3), 3 - (byte >> 4 & 3), 3 - (byte >> 6), end=" ", file=out)
-            """
+            write(3 - self.data[i], end=" ")
             i += 1
             if i % width == 0:
                 write()
 
+    def save_pnm(self, out, palette=None):
+        if palette is None:
+            palette = self.palette
+        def write(*args, **kw):
+            print(*args, file=out, **kw)
+        write("P6")
+        write(self.sizex, self.sizey) # width, height
+        write(31) # maxval
+        out.flush()
+        i = 0
+        width = self.sizex
+        for i in range(len(self.data)):
+            out.buffer.write(pack("<BBB", *palette[self.data[i]]))
+            i += 1
+            if i % width == 0:
+                write()
+
+    def save_img(self, *args, **kw):
+        if self.palette:
+            return self.save_pnm(*args, **kw)
+        else:
+            return self.save_pgm(*args, **kw)
+
+class Palette:
+    def __init__(self, colors):
+        self.colors = colors
+
+    @classmethod
+    def fromfile(cls, f):
+        colors = unpack("<HHHH", f.read(8))
+        colors = [cls.rgb15_to_rgb(x) for x in colors]
+        return cls(colors)
+
+    @staticmethod
+    def rgb15_to_rgb(v):
+        r = v & 31
+        g = (v >> 5) & 31
+        b = (v >> 10) & 31
+        return (r, g, b)
+
+    def __getitem__(self, i):
+        return self.colors[i]
 
 
 def fbitstream(f):
@@ -319,10 +356,8 @@ MEW_OFFSET = 0x425b
 ORDER_OFFSET = 0x41024
 ORDER_OFFSET_Y = 0x410b1
 ORDER_LENGTH = 0xbe
-
-#palette offsets
-# red: 0x725c9
-# yellow: 0x72922
+PALETTE_OFFSET = 0x725c8
+PALETTE_OFFSET_Y = 0x72921
 
 internal_ids = {}
 def read_pokedex_order(rom):
@@ -334,6 +369,20 @@ def read_pokedex_order(rom):
 
 def get_internal_id(poke):
     return internal_ids[poke]
+
+porder = palettes = None
+def read_palettes(rom):
+    global porder, palettes
+    offset = PALETTE_OFFSET_Y if version == 'yellow' else PALETTE_OFFSET
+    rom.seek(offset)
+    porder = rom.read(152)
+    palettes = []
+    for i in range(0x20):
+        palettes.append(Palette.fromfile(rom))
+
+def get_palette(poke):
+    return palettes[porder[poke]]
+
 
 def get_bank(poke):
     internal_id = get_internal_id(poke)
@@ -391,7 +440,9 @@ def extract_sprite(rom, poke, sprite='front', mirror=False):
     offset = get_offset(rom, poke, sprite=sprite)
     #print(hex(offset), file=sys.stderr)
     img = decompress(rom, offset, mirror=mirror)
+    img.palette = get_palette(poke)
     return img
+
 
 rompath = sys.argv[1]
 pokemon = int(sys.argv[2])
@@ -403,6 +454,8 @@ except LookupError:
 f = open(rompath, 'rb')
 version = get_version(f)
 read_pokedex_order(f)
+read_palettes(f)
+
 img = extract_sprite(f, pokemon, sprite=sprite)
-img.save_pgm(sys.stdout)
+img.save_img(sys.stdout)
 f.close()
