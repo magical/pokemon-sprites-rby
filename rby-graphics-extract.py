@@ -2,6 +2,7 @@
 import struct
 import io
 import sys
+import os, os.path
 from os import SEEK_CUR
 from struct import pack, unpack
 from array import array
@@ -483,21 +484,44 @@ def extract_sprite(rom, poke, sprite='front', mirror=False):
     img.palette = get_palette(poke)
     return img
 
+def extract_all(rom, directory):
+    base = directory
+    for sprite in ('front', 'back'):
+        if sprite == 'back':
+            back = 'back'
+        else:
+            back = ''
 
+        os.makedirs(os.path.join(base, back))
+        os.makedirs(os.path.join(base, back, 'gray'))
+
+        for poke in range(1, 151+1):
+            offset = get_offset(rom, poke, sprite)
+            img = decompress(rom, offset)
+
+            path = os.path.join(base, back, 'gray', str(poke)+".png")
+            img.save_png(open(path, 'wb'))
+
+            img.palette = get_palette(poke)
+            path = os.path.join(base, back, str(poke)+".png")
+            img.save_png(open(path, 'wb'))
 
 rompath = sys.argv[1]
-pokemon = int(sys.argv[2])
-try:
-    sprite = sys.argv[3]
-except LookupError:
-    sprite = 'front'
+#pokemon = int(sys.argv[2])
+#try:
+#    sprite = sys.argv[3]
+#except LookupError:
+#    sprite = 'front'
+directory = sys.argv[2]
 
 f = open(rompath, 'rb')
 version = get_version(f)
 read_pokedex_order(f)
 read_palettes(f)
 
-img = extract_sprite(f, pokemon, sprite=sprite)
-img.save_png(sys.stdout)
+#img = extract_sprite(f, pokemon, sprite=sprite)
+#img.save_png(sys.stdout)
 #img.save_ppm(sys.stdout)
-f.close()
+#f.close()
+
+extract_all(f, directory)
