@@ -7,6 +7,7 @@ from os import SEEK_CUR
 from struct import pack, unpack
 from array import array
 from subprocess import Popen, PIPE
+from collections import namedtuple
 
 def bitflip(x, n):
     r = 0
@@ -392,19 +393,41 @@ def decompress(f, offset=None, mirror=False):
     img = dcmp.to_image()
     return img
 
-BASE_STATS_OFFSET = 0x383de
-MEW_OFFSET = 0x425b
-ORDER_OFFSET = 0x41024
-ORDER_OFFSET_Y = 0x410b1
-ORDER_LENGTH = 0xbe
-PALETTE_OFFSET = 0x725c8
-PALETTE_OFFSET_Y = 0x72921
+
+Offsets = namedtuple("Offsets",
+    ("version base_stats base_stats_mew "
+     "pokedex_order pokedex_order_length "
+     "palette_map palettes"))
+
+_offsets = {}
+_offsets['red'] = Offsets('red',
+    base_stats = 0x383de,
+    base_stats_mew = 0x425b,
+    pokedex_order = 0x41024,
+    pokedex_order_length = 0xbe,
+    palette_map = 0x725c8,
+    palettes = 0x725c8 + 152,
+)
+_offsets['blue'] = _offsets['red']._replace(version='blue')
+_offsets['yellow'] = _offsets['red']._replace(version='yellow',
+    base_stats_mew = None,
+    pokedex_order = 0x410b1,
+    palette_map = 0x72921,
+    palettes = 0x72921 + 152,
+)
+_offsets['red.jp'] = _offsets['red']._replace(version='red.jp',
+    base_stats = 0x38000,
+    base_stats_mew =  0x4200,
+    pokedex_order = 0x4279a,
+    palette_map = 0x72a1e,
+    palettes = 0x72a1e + 152,
+)
+
 
 internal_ids = {}
-def read_pokedex_order(rom):
-    offset = ORDER_OFFSET_Y if version == 'yellow' else ORDER_OFFSET
-    rom.seek(offset)
-    order = array("B", rom.read(ORDER_LENGTH))
+def read_pokedex_order(rom, offsets):
+    rom.seek(offsets.pokedex_order)
+    order = array("B", rom.read(offsets.pokedex_order_length))
     for i in range(1, 151+1):
         internal_ids[i] = order.index(i) + 1
 
@@ -414,9 +437,10 @@ def get_internal_id(poke):
 porder = palettes = None
 def read_palettes(rom):
     global porder, palettes
-    offset = PALETTE_OFFSET_Y if version == 'yellow' else PALETTE_OFFSET
-    rom.seek(offset)
+    rom.seek(offsets.palette_map)
     porder = rom.read(152)
+
+    rom.seek(offsets.palettes)
     palettes = []
     for i in range(0x20):
         palettes.append(Palette.fromfile(rom))
@@ -427,7 +451,7 @@ def get_palette(poke):
 
 def get_bank(poke):
     internal_id = get_internal_id(poke)
-    if version in ('red', 'blue') and internal_id == 0x15:
+    if offsets.version in ('red', 'blue') and internal_id == 0x15:
         return 0x1
     elif internal_id == 0xb6:
         return 0xb
@@ -442,26 +466,37 @@ def get_bank(poke):
     else:
         return 0xd
 
-def get_offset(rom, poke, sprite='front'):
-    bank = get_bank(poke)
-    if version in ('red', 'blue') and poke == 151:
-        rom.seek(MEW_OFFSET)
-        #rom.seek(BASE_STATS_OFFSET)
-        #rom.seek((poke - 1) * 28, SEEK_CUR)
-    else:
-        rom.seek(BASE_STATS_OFFSET)
-        rom.seek((poke - 1) * 28, SEEK_CUR)
-    rom.seek(11, SEEK_CUR)
+def find_bank(rom, pointer, size):
+    banks = []
+    rom.seek(pointer - 0x4000)
+    for bank in range(0x3f):
+        byte = rom.read(1)
+        if byte == size:
+            banks.append(bank)
+        rom.seek(0x4000-1, SEEK_CUR)
+    return banks
 
-    offsets = unpack("<HH", rom.read(4))
+def get_pointer(rom, poke, sprite='front'):
+    bank = get_bank(poke)
+    if poke == 151:
+        rom.seek(offsets.base_stats_mew)
+    else:
+        rom.seek(offsets.base_stats)
+        rom.seek((poke - 1) * 28, SEEK_CUR)
+    #rom.seek(11, SEEK_CUR)
+    rom.seek(10, SEEK_CUR)
+    size = rom.read(1)
+
+    pointers = unpack("<HH", rom.read(4))
 
     if sprite == 'front':
-        offset = offsets[0]
+        offset = pointers[0]
     elif sprite == 'back':
-        offset = offsets[1]
+        offset = pointers[1]
     else:
         raise ValueError(sprite)
 
+    #print(poke, get_internal_id(poke), hex(bank), list(map(hex, find_bank(rom, offset, size))))
     return ((bank - 1) << 14) + offset
 
 def get_version(rom):
@@ -476,9 +511,11 @@ def get_version(rom):
 
     raise ValueError("Unknown game", title)
 
+def get_offsets(version):
+    return _offsets[version]
 
 def extract_sprite(rom, poke, sprite='front', mirror=False):
-    offset = get_offset(rom, poke, sprite=sprite)
+    offset = get_pointer(rom, poke, sprite=sprite)
     #print(hex(offset), file=sys.stderr)
     img = decompress(rom, offset, mirror=mirror)
     img.palette = get_palette(poke)
@@ -496,7 +533,7 @@ def extract_all(rom, directory):
         os.makedirs(os.path.join(base, back, 'gray'))
 
         for poke in range(1, 151+1):
-            offset = get_offset(rom, poke, sprite)
+            offset = get_pointer(rom, poke, sprite)
             img = decompress(rom, offset)
 
             path = os.path.join(base, back, 'gray', str(poke)+".png")
@@ -507,21 +544,23 @@ def extract_all(rom, directory):
             img.save_png(open(path, 'wb'))
 
 rompath = sys.argv[1]
-#pokemon = int(sys.argv[2])
-#try:
-#    sprite = sys.argv[3]
-#except LookupError:
-#    sprite = 'front'
-directory = sys.argv[2]
+pokemon = int(sys.argv[2])
+try:
+    sprite = sys.argv[3]
+except LookupError:
+    sprite = 'front'
+#directory = sys.argv[2]
 
 f = open(rompath, 'rb')
-version = get_version(f)
-read_pokedex_order(f)
+#version = get_version(f)
+version = 'red.jp'
+offsets = get_offsets(version)
+read_pokedex_order(f, offsets)
 read_palettes(f)
 
-#img = extract_sprite(f, pokemon, sprite=sprite)
-#img.save_png(sys.stdout)
+img = extract_sprite(f, pokemon, sprite=sprite)
+img.save_png(sys.stdout)
 #img.save_ppm(sys.stdout)
-#f.close()
+f.close()
 
-extract_all(f, directory)
+#extract_all(f, directory)
