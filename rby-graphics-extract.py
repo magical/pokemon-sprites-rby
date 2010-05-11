@@ -374,6 +374,54 @@ class Image:
         p.stdin.close()
         p.wait()
 
+    def save_boxes(self, out, palette=None):
+        if palette is None:
+            palette = self.palette
+        char_palette = "\u00a0\u2591\u2592\u2593\u2588"
+
+        def write(*args, **kw):
+            print(*args, file=out, **kw)
+
+        width = self.sizex
+        for i, byte in enumerate(self.data):
+            write(char_palette[byte] * 2, end="")
+            if (i + 1) % width == 0:
+                write()
+
+    def save_xterm(self, out, palette=None):
+        if palette is None:
+            palette = self.palette
+
+        def write(*args, **kw):
+            print(*args, file=out, **kw)
+
+        if palette:
+            colors = []
+            for i, (r, g, b) in enumerate(palette):
+                r = round(r / 31 * 5)
+                g = round(g / 31 * 5)
+                b = round(b / 31 * 5)
+                color = 16 + r * 36 + g * 6 + b
+                colors.append(color)
+
+                #r = round(r / 31 * 255)
+                #g = round(g / 31 * 255)
+                #b = round(b / 31 * 255)
+                #write("\x1b]4;%d;rgb:%2.2x/%2.2x/%2.2x\x1b\\" % (i + 16, r, g, b), end="")
+            palette = colors
+        else:
+            palette = [231, 248, 240, 232]
+
+        width = self.sizex
+        for i, byte in enumerate(self.data):
+            # xterm color escapes
+            # set background color
+            write("\033[48;5;{color}m".format(color=palette[byte]), end="")
+            #write("\033[48;5;{color}m".format(color=byte + 16), end="")
+            write("\N{NO-BREAK SPACE}" * 2, end="")
+            if (i + 1) % width == 0:
+                write()
+        write("\033[0m")
 
 class Palette:
     def __init__(self, colors):
@@ -624,8 +672,10 @@ if MODE == 'single':
         sprite = 'front'
 
     img = extract_sprite(game, pokemon, sprite=sprite)
-    img.save_png(sys.stdout)
-    #img.save_ppm(sys.stdout)
+    #img.save_png(sys.stdout)
+    #img.save_pnm(sys.stdout)
+    #img.save_boxes(sys.stdout)
+    img.save_xterm(sys.stdout)
     f.close()
 elif MODE == 'all':
     directory = sys.argv[2]
