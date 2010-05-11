@@ -3,6 +3,7 @@ import struct
 import io
 import sys
 import os, os.path
+import itertools
 from os import SEEK_CUR
 from struct import pack, unpack
 from array import array
@@ -219,6 +220,63 @@ class Decompressor:
         """Read an integer `count` bits in length."""
         return readint(self.bs, count)
 
+def fbitstream(f):
+    while 1:
+        char = f.read(1)
+        if not char:
+            break
+        byte = char[0]
+
+        yield (byte >> 7) & 1
+        yield (byte >> 6) & 1
+        yield (byte >> 5) & 1
+        yield (byte >> 4) & 1
+        yield (byte >> 3) & 1
+        yield (byte >> 2) & 1
+        yield (byte >> 1) & 1
+        yield byte & 1
+
+def bitstream(b):
+    for byte in b:
+        yield (byte >> 7) & 1
+        yield (byte >> 6) & 1
+        yield (byte >> 5) & 1
+        yield (byte >> 4) & 1
+        yield (byte >> 3) & 1
+        yield (byte >> 2) & 1
+        yield (byte >> 1) & 1
+        yield byte & 1
+
+def readint(bs, count):
+    """Read an integer `count` bits long from `bs`."""
+    n = 0
+    while count:
+        n <<= 1
+        n |= next(bs)
+        count -= 1
+    return n
+
+def bitgroups_to_bytes(bits):
+    l = []
+    for i in range(0, len(bits)-3, 4):
+        n = ((bits[i] << 6)
+             | (bits[i+1] << 4)
+             | (bits[i+2] << 2)
+             | (bits[i+3]))
+        l.append(n)
+    return bytes(l)
+
+def decompress(f, offset=None, mirror=False):
+    if offset is not None:
+        f.seek(offset)
+
+    dcmp = Decompressor(f, mirror=mirror)
+    dcmp.decompress()
+    img = dcmp.to_image()
+    return img
+
+
+
 class Image:
     def __init__(self, size, data=None):
         self.sizex, self.sizey = size
@@ -337,92 +395,45 @@ class Palette:
     def __getitem__(self, i):
         return self.colors[i]
 
-
-def fbitstream(f):
-    while 1:
-        char = f.read(1)
-        if not char:
-            break
-        byte = char[0]
-
-        yield (byte >> 7) & 1
-        yield (byte >> 6) & 1
-        yield (byte >> 5) & 1
-        yield (byte >> 4) & 1
-        yield (byte >> 3) & 1
-        yield (byte >> 2) & 1
-        yield (byte >> 1) & 1
-        yield byte & 1
-
-def bitstream(b):
-    for byte in b:
-        yield (byte >> 7) & 1
-        yield (byte >> 6) & 1
-        yield (byte >> 5) & 1
-        yield (byte >> 4) & 1
-        yield (byte >> 3) & 1
-        yield (byte >> 2) & 1
-        yield (byte >> 1) & 1
-        yield byte & 1
-
-def readint(bs, count):
-    """Read an integer `count` bits long from `bs`."""
-    n = 0
-    while count:
-        n <<= 1
-        n |= next(bs)
-        count -= 1
-    return n
-
-def bitgroups_to_bytes(bits):
-    l = []
-    for i in range(0, len(bits)-3, 4):
-        n = ((bits[i] << 6)
-             | (bits[i+1] << 4)
-             | (bits[i+2] << 2)
-             | (bits[i+3]))
-        l.append(n)
-    return bytes(l)
-
-def decompress(f, offset=None, mirror=False):
-    if offset is not None:
-        f.seek(offset)
-
-    dcmp = Decompressor(f, mirror=mirror)
-    dcmp.decompress()
-    img = dcmp.to_image()
-    return img
-
+
 
 Offsets = namedtuple("Offsets",
     ("version base_stats base_stats_mew "
      "pokedex_order pokedex_order_length "
      "palette_map palettes"))
 
-_offsets = {}
-_offsets['red'] = Offsets('red',
-    base_stats = 0x383de,
-    base_stats_mew = 0x425b,
-    pokedex_order = 0x41024,
-    pokedex_order_length = 0xbe,
-    palette_map = 0x725c8,
-    palettes = 0x725c8 + 152,
-)
-_offsets['blue'] = _offsets['red']._replace(version='blue')
-_offsets['yellow'] = _offsets['red']._replace(version='yellow',
-    base_stats_mew = None,
-    pokedex_order = 0x410b1,
-    palette_map = 0x72921,
-    palettes = 0x72921 + 152,
-)
-_offsets['red.jp'] = _offsets['red']._replace(version='red.jp',
-    base_stats = 0x38000,
-    base_stats_mew =  0x4200,
-    pokedex_order = 0x4279a,
-    palette_map = 0x72a1e,
-    palettes = 0x72a1e + 152,
-)
+def find_in_rom(rom, pat):
+    rom.seek(0)
+    for bank in itertools.count():
+        data = rom.read(0x4000)
+        if not data:
+            break
+        index = data.find(pat)
+        if index != -1:
+            return bank * 0x4000 + index
 
+    raise IndexError
+
+def find_offsets(rom):
+    bulbasaur_stats = pack("<BBBBBB", 1, 0x2d, 0x31, 0x31, 0x2d, 0x41)
+    mew_stats = pack("<BBBBBB", 151, 100, 100, 100, 100, 100)
+    palette_map = b"\x10\x16\x16\x16\x12\x12\x12\x13\x13\x13"
+    pokedex_order = b"\x70\x73\x20\x23\x15\x64\x22\x50"
+    
+    version = get_version(rom)
+    offsets = {}
+    offsets['base_stats'] = find_in_rom(rom, bulbasaur_stats)
+    offsets['base_stats_mew'] = find_in_rom(rom, mew_stats)
+    offsets['pokedex_order'] = find_in_rom(rom, pokedex_order)
+    offsets['palette_map'] = find_in_rom(rom, palette_map)
+    offsets['palettes'] = offsets['palette_map'] + 152
+
+    if offsets['base_stats_mew'] > 0x8000:
+        offsets['base_stats_mew'] = None
+    if version == 'yellow':
+        offsets['palettes'] += 40 * 8
+
+    return Offsets(version=version, pokedex_order_length=0xbe, **offsets)
 
 internal_ids = {}
 def read_pokedex_order(rom, offsets):
@@ -435,7 +446,7 @@ def get_internal_id(poke):
     return internal_ids[poke]
 
 porder = palettes = None
-def read_palettes(rom):
+def read_palettes(rom, munge=False):
     global porder, palettes
     rom.seek(offsets.palette_map)
     porder = rom.read(152)
@@ -444,6 +455,8 @@ def read_palettes(rom):
     palettes = []
     for i in range(0x20):
         palettes.append(Palette.fromfile(rom))
+        if munge:
+            palettes[i].colors[0] = (31, 31, 31)
 
 def get_palette(poke):
     return palettes[porder[poke]]
@@ -451,7 +464,7 @@ def get_palette(poke):
 
 def get_bank(poke):
     internal_id = get_internal_id(poke)
-    if offsets.version in ('red', 'blue') and internal_id == 0x15:
+    if offsets.base_stats_mew is not None and internal_id == 0x15:
         return 0x1
     elif internal_id == 0xb6:
         return 0xb
@@ -459,8 +472,12 @@ def get_bank(poke):
         return 0x9
     elif internal_id < 0x4a:
         return 0xa
+    elif offsets.version in ('red.jp', 'green.jp') and internal_id < 0x75:
+        return 0xb
     elif internal_id < 0x74:
         return 0xb
+    elif offsets.version in ('red.jp', 'green.jp') and internal_id < 0x9a:
+        return 0xc
     elif internal_id < 0x99:
         return 0xc
     else:
@@ -502,17 +519,22 @@ def get_pointer(rom, poke, sprite='front'):
 def get_version(rom):
     rom.seek(0x134)
     title = rom.read(16).rstrip(b"\x00\x80")
+    rom.seek(0x134+22)
+    country = rom.read(1)[0]
+
     if title == b"POKEMON RED":
-        return 'red'
+        if country == 0:
+            return 'red.jp'
+        else:
+            return 'red'
+    elif title == b"POKEMON GREEN":
+        return 'green.jp'
     elif title == b"POKEMON BLUE":
         return 'blue'
     elif title == b"POKEMON YELLOW":
         return 'yellow'
 
     raise ValueError("Unknown game", title)
-
-def get_offsets(version):
-    return _offsets[version]
 
 def extract_sprite(rom, poke, sprite='front', mirror=False):
     offset = get_pointer(rom, poke, sprite=sprite)
@@ -529,38 +551,53 @@ def extract_all(rom, directory):
         else:
             back = ''
 
-        os.makedirs(os.path.join(base, back))
-        os.makedirs(os.path.join(base, back, 'gray'))
+        xmakedirs(os.path.join(base, back))
+        #xmakedirs(os.path.join(base, back, 'gray'))
 
         for poke in range(1, 151+1):
             offset = get_pointer(rom, poke, sprite)
-            img = decompress(rom, offset)
 
-            path = os.path.join(base, back, 'gray', str(poke)+".png")
-            img.save_png(open(path, 'wb'))
-
-            img.palette = get_palette(poke)
             path = os.path.join(base, back, str(poke)+".png")
+            img = decompress(rom, offset)
+            img.palette = get_palette(poke)
+            print(path)
             img.save_png(open(path, 'wb'))
+            sys.stdout.flush()
+
+            #path = os.path.join(base, back, 'gray', str(poke)+".png")
+            #img.save_png(open(path, 'wb'), palette=False)
+
+def xmakedirs(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+
+#MODE = 'single'
+MODE = 'all'
 
 rompath = sys.argv[1]
-pokemon = int(sys.argv[2])
-try:
-    sprite = sys.argv[3]
-except LookupError:
-    sprite = 'front'
-#directory = sys.argv[2]
 
 f = open(rompath, 'rb')
-#version = get_version(f)
-version = 'red.jp'
-offsets = get_offsets(version)
+offsets = find_offsets(f)
+print(offsets)
 read_pokedex_order(f, offsets)
-read_palettes(f)
+if 'yellow' not in offsets.version:
+    read_palettes(f, munge=True)
+else:
+    read_palettes(f, munge=False)
 
-img = extract_sprite(f, pokemon, sprite=sprite)
-img.save_png(sys.stdout)
-#img.save_ppm(sys.stdout)
-f.close()
+if MODE == 'single':
+    pokemon = int(sys.argv[2])
+    try:
+        sprite = sys.argv[3]
+    except LookupError:
+        sprite = 'front'
 
-#extract_all(f, directory)
+    img = extract_sprite(f, pokemon, sprite=sprite)
+    img.save_png(sys.stdout)
+    #img.save_ppm(sys.stdout)
+    f.close()
+elif MODE == 'all':
+    directory = sys.argv[2]
+
+    extract_all(f, directory)
