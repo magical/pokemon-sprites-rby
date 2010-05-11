@@ -284,6 +284,17 @@ class Image:
         self.data = data
         self.palette = None
 
+    def save_format(self, format, *args, **kw):
+        formats = {
+            'png': self.save_png,
+            'pnm': self.save_pnm,
+            'ppm': self.save_ppm,
+            'pgm': self.save_pgm,
+            'boxes': self.save_boxes,
+            'xterm': self.save_xterm,
+        }
+        return formats[format](*args, **kw)
+
     # PIL is not yet available for python 3, so we'll write out a pgm(5) file,
     # and let netpbm(1) sort it out.
     def save_pam(self, out):
@@ -626,35 +637,38 @@ def extract_sprite(game, poke, color=None, sprite='front', mirror=False):
     img.palette = game.get_palette(poke, color)
     return img
 
-def extract_all(game, directory):
+def extract_all(game, directory, format="png"):
     basedir = directory
-    for sprite in ('front', 'back'):
+    ext = "." + format
+    for facing in ('front', 'back'):
         for color in game.colors:
-            path = construct_path(basedir, back=back, palette=color)
+            path = construct_path(basedir, facing=facing, palette=color)
             xmakedirs(path)
 
         for poke in range(1, 151+1):
-            offset = game.get_sprite_offset(poke, sprite)
+            offset = game.get_sprite_offset(poke, facing)
 
             img = decompress(game.rom, offset)
             for color in game.colors:
-                path = construct_path(basedir, back=back, palette=color)
-                path = os.path.join(path, str(poke)+".png")
+                path = construct_path(basedir, facing=facing, palette=color)
+                path = os.path.join(path, str(poke)+ext)
+                print(path)
+
                 if color == 'gray':
                     img.palette = False
                 else:
-                    img.palette = get_palette(poke)
+                    img.palette = game.get_palette(poke, color)
 
-                img.save_png(open(path, 'wb'))
+                img.save_format(format, open(path, 'wb'))
 
             #img.save_png(open(path, 'wb'), palette=False)
 
-def construct_path(base, version="", back="", palette=""):
-    if back == "front":
-        back = ""
+def construct_path(base, version="", facing="", palette=""):
+    if facing == "front":
+        facing = ""
     if palette == "sgb":
         palette = ""
-    return os.path.join(base, version, back, palette)
+    return os.path.join(base, version, facing, palette)
 
 def xmakedirs(path):
     if not os.path.exists(path):
@@ -698,17 +712,9 @@ def main():
 
     if args.mode == 'single':
         img = extract_sprite(game, args.pokemon, sprite=args.facing, color=args.color)
-        formats = {
-            'png': img.save_png,
-            'pnm': img.save_pnm,
-            'ppm': img.save_ppm,
-            'pgm': img.save_pgm,
-            'boxes': img.save_boxes,
-            'xterm': img.save_xterm,
-        }
-        formats[args.format](sys.stdout)
+        img.save_format(args.format, sys.stdout)
     elif args.mode == 'all':
-        extract_all(game, args.directory)
+        extract_all(game, args.directory, format=args.format)
     else:
         raise ValueError(args.mode)
 
