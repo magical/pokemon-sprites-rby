@@ -8,7 +8,7 @@ from os import SEEK_CUR
 from struct import pack, unpack
 from array import array
 from subprocess import Popen, PIPE
-from collections import namedtuple
+from collections import namedtuple, OrderedDict as odict
 
 def bitflip(x, n):
     r = 0
@@ -398,92 +398,162 @@ class Palette:
 
 
 Offsets = namedtuple("Offsets",
-    ("version base_stats base_stats_mew "
+    ("base_stats base_stats_mew "
      "pokedex_order pokedex_order_length "
-     "palette_map palettes"))
+     "palette_map palettes "))
 
-def find_in_rom(rom, pat):
-    rom.seek(0)
-    for bank in itertools.count():
-        data = rom.read(0x4000)
-        if not data:
-            break
-        index = data.find(pat)
-        if index != -1:
-            return bank * 0x4000 + index
+class Game:
+    def __init__(self, rom):
+        self.rom = rom
+        self._read_info()
+        self._find_offsets()
 
-    raise IndexError
+        self.internal_ids = {}
+        self._read_internal_ids()
 
-def find_offsets(rom):
-    bulbasaur_stats = pack("<BBBBBB", 1, 0x2d, 0x31, 0x31, 0x2d, 0x41)
-    mew_stats = pack("<BBBBBB", 151, 100, 100, 100, 100, 100)
-    palette_map = b"\x10\x16\x16\x16\x12\x12\x12\x13\x13\x13"
-    pokedex_order = b"\x70\x73\x20\x23\x15\x64\x22\x50"
-    
-    version = get_version(rom)
-    offsets = {}
-    offsets['base_stats'] = find_in_rom(rom, bulbasaur_stats)
-    offsets['base_stats_mew'] = find_in_rom(rom, mew_stats)
-    offsets['pokedex_order'] = find_in_rom(rom, pokedex_order)
-    offsets['palette_map'] = find_in_rom(rom, palette_map)
-    offsets['palettes'] = offsets['palette_map'] + 152
+        self._read_palette_map()
+        self._read_palettes()
 
-    if offsets['base_stats_mew'] > 0x8000:
-        offsets['base_stats_mew'] = None
-    if version == 'yellow':
-        offsets['palettes'] += 40 * 8
+    def _read_info(self):
+        rom = self.rom
 
-    return Offsets(version=version, pokedex_order_length=0xbe, **offsets)
+        rom.seek(0x134)
+        title = rom.read(15).rstrip(b"\x00")
 
-internal_ids = {}
-def read_pokedex_order(rom, offsets):
-    rom.seek(offsets.pokedex_order)
-    order = array("B", rom.read(offsets.pokedex_order_length))
-    for i in range(1, 151+1):
-        internal_ids[i] = order.index(i) + 1
+        rom.seek(0x134 + 22)
+        country = rom.read(1)[0]
 
-def get_internal_id(poke):
-    return internal_ids[poke]
+        rom.seek(0x134 + 18)
+        self.has_sgb = rom.read(1) == b"\x03"
 
-porder = palettes = None
-def read_palettes(rom, munge=False):
-    global porder, palettes
-    rom.seek(offsets.palette_map)
-    porder = rom.read(152)
+        rom.seek(0x134 + 15)
+        self.has_gbc = rom.read(1) == b"\x80"
 
-    rom.seek(offsets.palettes)
-    palettes = []
-    for i in range(0x20):
-        palettes.append(Palette.fromfile(rom))
-        if munge:
-            palettes[i].colors[0] = (31, 31, 31)
+        if title == b"POKEMON RED":
+            if country == 0:
+                self.version = 'red.jp'
+            else:
+                self.version = 'red'
+        elif title == b"POKEMON GREEN":
+            self.version = 'green.jp'
+        elif title == b"POKEMON BLUE":
+            self.version = 'blue'
+        elif title == b"POKEMON YELLOW":
+            self.version = 'yellow'
+        else:
+            raise ValueError("Unknown game", title)
 
-def get_palette(poke):
-    return palettes[porder[poke]]
+        self.title = title
+        self.country = country
 
+        self.colors = ['gray']
+        if self.has_sgb:
+            self.colors.append('sgb')
+        if self.has_gbc:
+            self.colors.append('gbc')
 
-def get_bank(poke):
-    internal_id = get_internal_id(poke)
-    if offsets.base_stats_mew is not None and internal_id == 0x15:
-        return 0x1
-    elif internal_id == 0xb6:
-        return 0xb
-    elif internal_id < 0x1f:
-        return 0x9
-    elif internal_id < 0x4a:
-        return 0xa
-    elif offsets.version in ('red.jp', 'green.jp') and internal_id < 0x75:
-        return 0xb
-    elif internal_id < 0x74:
-        return 0xb
-    elif offsets.version in ('red.jp', 'green.jp') and internal_id < 0x9a:
-        return 0xc
-    elif internal_id < 0x99:
-        return 0xc
-    else:
-        return 0xd
+    def _find(self, pat):
+        self.rom.seek(0)
+        for bank in itertools.count():
+            data = self.rom.read(0x4000)
+            if not data:
+                break
+            index = data.find(pat)
+            if index != -1:
+                return bank * 0x4000 + index
 
-def find_bank(rom, pointer, size):
+        raise IndexError
+
+    def _find_offsets(self):
+        # search strings
+        bulbasaur_stats = pack("<BBBBBB", 1, 0x2d, 0x31, 0x31, 0x2d, 0x41)
+        mew_stats = pack("<BBBBBB", 151, 100, 100, 100, 100, 100)
+        palette_map = b"\x10\x16\x16\x16\x12\x12\x12\x13\x13\x13"
+        pokedex_order = b"\x70\x73\x20\x23\x15\x64\x22\x50"
+
+        offsets = {}
+        offsets['base_stats'] = self._find(bulbasaur_stats)
+        offsets['base_stats_mew'] = self._find(mew_stats)
+        offsets['pokedex_order'] = self._find(pokedex_order)
+        offsets['palette_map'] = self._find(palette_map)
+        offsets['palettes'] = offsets['palette_map'] + 152
+
+        if offsets['base_stats_mew'] > 0x8000:
+            offsets['base_stats_mew'] = None
+
+        self.offsets = Offsets(pokedex_order_length=0xbe, **offsets)
+
+    def _read_internal_ids(self):
+        self.rom.seek(self.offsets.pokedex_order)
+        order = array("B", self.rom.read(self.offsets.pokedex_order_length))
+        for i in range(1, 151+1):
+            self.internal_ids[i] = order.index(i) + 1
+
+    def _read_palette_map(self):
+        self.rom.seek(self.offsets.palette_map)
+        self.palette_map = list(self.rom.read(152))
+
+    def _read_palettes(self, munge=True):
+        self.palettes = odict()
+
+        self.rom.seek(self.offsets.palettes)
+        for color in self.colors:
+            if color == 'gray':
+                continue
+            palettes = self.palettes[color] = []
+            for i in range(40):
+                palettes.append(Palette.fromfile(self.rom))
+                if color == 'sgb' and munge:
+                    palettes[i].colors[0] = (31, 31, 31)
+
+    def get_palette(self, poke, color):
+        return self.palettes[color][self.palette_map[poke]]
+
+    def get_bank(self, poke):
+        internal_id = self.internal_ids[poke]
+        if self.offsets.base_stats_mew is not None and internal_id == 0x15:
+            return 0x1
+        elif internal_id == 0xb6:
+            return 0xb
+        elif internal_id < 0x1f:
+            return 0x9
+        elif internal_id < 0x4a:
+            return 0xa
+        elif self.version in ('red.jp', 'green.jp') and internal_id < 0x75:
+            return 0xb
+        elif internal_id < 0x74:
+            return 0xb
+        elif self.version in ('red.jp', 'green.jp') and internal_id < 0x9a:
+            return 0xc
+        elif internal_id < 0x99:
+            return 0xc
+        else:
+            return 0xd
+
+    def get_sprite_offset(self, poke, sprite='front'):
+        if poke == 151 and self.offsets.base_stats_mew is not None:
+            self.rom.seek(self.offsets.base_stats_mew)
+        else:
+            self.rom.seek(self.offsets.base_stats)
+            self.rom.seek((poke - 1) * 28, SEEK_CUR)
+
+        self.rom.seek(10, SEEK_CUR)
+        size = self.rom.read(1)
+
+        pointers = unpack("<HH", self.rom.read(4))
+
+        if sprite == 'front':
+            offset = pointers[0]
+        elif sprite == 'back':
+            offset = pointers[1]
+        else:
+            raise ValueError(sprite)
+
+        bank = self.get_bank(poke)
+        #print(poke, get_internal_id(poke), hex(bank), list(map(hex, find_bank(rom, offset, size))))
+        return ((bank - 1) << 14) + offset
+
+def find_banks(rom, pointer, size):
     banks = []
     rom.seek(pointer - 0x4000)
     for bank in range(0x3f):
@@ -493,98 +563,58 @@ def find_bank(rom, pointer, size):
         rom.seek(0x4000-1, SEEK_CUR)
     return banks
 
-def get_pointer(rom, poke, sprite='front'):
-    bank = get_bank(poke)
-    if poke == 151:
-        rom.seek(offsets.base_stats_mew)
-    else:
-        rom.seek(offsets.base_stats)
-        rom.seek((poke - 1) * 28, SEEK_CUR)
-    #rom.seek(11, SEEK_CUR)
-    rom.seek(10, SEEK_CUR)
-    size = rom.read(1)
-
-    pointers = unpack("<HH", rom.read(4))
-
-    if sprite == 'front':
-        offset = pointers[0]
-    elif sprite == 'back':
-        offset = pointers[1]
-    else:
-        raise ValueError(sprite)
-
-    #print(poke, get_internal_id(poke), hex(bank), list(map(hex, find_bank(rom, offset, size))))
-    return ((bank - 1) << 14) + offset
-
-def get_version(rom):
-    rom.seek(0x134)
-    title = rom.read(16).rstrip(b"\x00\x80")
-    rom.seek(0x134+22)
-    country = rom.read(1)[0]
-
-    if title == b"POKEMON RED":
-        if country == 0:
-            return 'red.jp'
-        else:
-            return 'red'
-    elif title == b"POKEMON GREEN":
-        return 'green.jp'
-    elif title == b"POKEMON BLUE":
-        return 'blue'
-    elif title == b"POKEMON YELLOW":
-        return 'yellow'
-
-    raise ValueError("Unknown game", title)
-
-def extract_sprite(rom, poke, sprite='front', mirror=False):
-    offset = get_pointer(rom, poke, sprite=sprite)
+def extract_sprite(game, poke, sprite='front', mirror=False):
+    offset = game.get_sprite_offset(poke, sprite=sprite)
     #print(hex(offset), file=sys.stderr)
-    img = decompress(rom, offset, mirror=mirror)
-    img.palette = get_palette(poke)
+    img = decompress(game.rom, offset, mirror=mirror)
+    colors = 'gbc' if game.has_gbc else 'sgb'
+    img.palette = game.get_palette(poke, colors)
     return img
 
-def extract_all(rom, directory):
-    base = directory
+def extract_all(game, directory):
+    basedir = directory
     for sprite in ('front', 'back'):
-        if sprite == 'back':
-            back = 'back'
-        else:
-            back = ''
-
-        xmakedirs(os.path.join(base, back))
-        #xmakedirs(os.path.join(base, back, 'gray'))
+        for color in colors:
+            path = construct_path(basedir, back=back, palette=color)
+            xmakedirs(path)
 
         for poke in range(1, 151+1):
-            offset = get_pointer(rom, poke, sprite)
+            offset = game.get_sprite_offset(poke, sprite)
 
-            path = os.path.join(base, back, str(poke)+".png")
-            img = decompress(rom, offset)
-            img.palette = get_palette(poke)
-            print(path)
-            img.save_png(open(path, 'wb'))
-            sys.stdout.flush()
+            img = decompress(game.rom, offset)
+            for color in colors:
+                path = construct_path(basedir, back=back, palette=color)
+                path = os.path.join(path, str(poke)+".png")
+                if color == 'gray':
+                    img.palette = False
+                else:
+                    img.palette = get_palette(poke)
 
-            #path = os.path.join(base, back, 'gray', str(poke)+".png")
+                img.save_png(open(path, 'wb'))
+
             #img.save_png(open(path, 'wb'), palette=False)
+
+def construct_path(base, version="", back="", palette=""):
+    if back == "front":
+        back = ""
+    if palette == "sgb":
+        palette = ""
+    return os.path.join(base, version, back, palette)
 
 def xmakedirs(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
 
-#MODE = 'single'
-MODE = 'all'
+MODE = 'single'
+#MODE = 'all'
 
 rompath = sys.argv[1]
 
 f = open(rompath, 'rb')
-offsets = find_offsets(f)
-print(offsets)
-read_pokedex_order(f, offsets)
-if 'yellow' not in offsets.version:
-    read_palettes(f, munge=True)
-else:
-    read_palettes(f, munge=False)
+game = Game(f)
+game._read_palettes(munge=False)
+#print(game.offsets)
 
 if MODE == 'single':
     pokemon = int(sys.argv[2])
@@ -593,11 +623,11 @@ if MODE == 'single':
     except LookupError:
         sprite = 'front'
 
-    img = extract_sprite(f, pokemon, sprite=sprite)
+    img = extract_sprite(game, pokemon, sprite=sprite)
     img.save_png(sys.stdout)
     #img.save_ppm(sys.stdout)
     f.close()
 elif MODE == 'all':
     directory = sys.argv[2]
 
-    extract_all(f, directory)
+    extract_all(game, directory)
