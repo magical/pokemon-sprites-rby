@@ -4,6 +4,7 @@ import io
 import sys
 import os, os.path
 import itertools
+import argparse
 from os import SEEK_CUR
 from struct import pack, unpack
 from array import array
@@ -451,7 +452,7 @@ Offsets = namedtuple("Offsets",
      "palette_map palettes "))
 
 class Game:
-    def __init__(self, rom):
+    def __init__(self, rom, munge=None):
         self.rom = rom
         self._read_info()
         self._find_offsets()
@@ -460,7 +461,10 @@ class Game:
         self._read_internal_ids()
 
         self._read_palette_map()
-        self._read_palettes()
+        if munge is not None:
+            self._read_palettes(munge)
+        else:
+            self._read_palettes()
 
     def _read_info(self):
         rom = self.rom
@@ -611,18 +615,21 @@ def find_banks(rom, pointer, size):
         rom.seek(0x4000-1, SEEK_CUR)
     return banks
 
-def extract_sprite(game, poke, sprite='front', mirror=False):
+
+
+def extract_sprite(game, poke, color=None, sprite='front', mirror=False):
+    if color is None:
+        color = game.colors[-1]
     offset = game.get_sprite_offset(poke, sprite=sprite)
     #print(hex(offset), file=sys.stderr)
     img = decompress(game.rom, offset, mirror=mirror)
-    colors = 'gbc' if game.has_gbc else 'sgb'
-    img.palette = game.get_palette(poke, colors)
+    img.palette = game.get_palette(poke, color)
     return img
 
 def extract_all(game, directory):
     basedir = directory
     for sprite in ('front', 'back'):
-        for color in colors:
+        for color in game.colors:
             path = construct_path(basedir, back=back, palette=color)
             xmakedirs(path)
 
@@ -630,7 +637,7 @@ def extract_all(game, directory):
             offset = game.get_sprite_offset(poke, sprite)
 
             img = decompress(game.rom, offset)
-            for color in colors:
+            for color in game.colors:
                 path = construct_path(basedir, back=back, palette=color)
                 path = os.path.join(path, str(poke)+".png")
                 if color == 'gray':
@@ -653,31 +660,58 @@ def xmakedirs(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
+
 
-MODE = 'single'
-#MODE = 'all'
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("rompath")
+    parser.add_argument("-d", "--directory", action="store_true")
 
-rompath = sys.argv[1]
+    args, _ = parser.parse_known_args()
+    if args.directory:
+        parser_all = argparse.ArgumentParser()
+        parser_all.add_argument("rompath")
+        parser_all.add_argument("-d", "--directory")
+        parser_all.add_argument("-f", "--format", default="png")
+        parser_all.add_argument("--munge", action="store_true", default=True)
+        parser_all.add_argument("--no-munge", dest="munge", action="store_false")
+        parser_all.set_defaults(mode='all')
+        return parser_all.parse_args()
+    else:
+        parser_single = argparse.ArgumentParser()
+        parser_single.add_argument("rompath")
+        parser_single.add_argument("pokemon", type=int)
+        parser_single.add_argument("facing", nargs='?', default='front')
+        parser_single.add_argument("-c", "--color")
+        parser_single.add_argument("-f", "--format", default="pnm")
+        parser_single.add_argument("--munge", action="store_true", default=True)
+        parser_single.add_argument("--no-munge", dest="munge", action="store_false")
+        parser_single.set_defaults(mode='single')
+        return parser_single.parse_args()
 
-f = open(rompath, 'rb')
-game = Game(f)
-game._read_palettes(munge=False)
-#print(game.offsets)
+def main():
+    args = parse_args()
 
-if MODE == 'single':
-    pokemon = int(sys.argv[2])
-    try:
-        sprite = sys.argv[3]
-    except LookupError:
-        sprite = 'front'
+    f = open(args.rompath, 'rb')
+    game = Game(f, args.munge)
+    #print(game.offsets)
 
-    img = extract_sprite(game, pokemon, sprite=sprite)
-    #img.save_png(sys.stdout)
-    #img.save_pnm(sys.stdout)
-    #img.save_boxes(sys.stdout)
-    img.save_xterm(sys.stdout)
+    if args.mode == 'single':
+        img = extract_sprite(game, args.pokemon, sprite=args.facing, color=args.color)
+        formats = {
+            'png': img.save_png,
+            'pnm': img.save_pnm,
+            'ppm': img.save_ppm,
+            'pgm': img.save_pgm,
+            'boxes': img.save_boxes,
+            'xterm': img.save_xterm,
+        }
+        formats[args.format](sys.stdout)
+    elif args.mode == 'all':
+        extract_all(game, args.directory)
+    else:
+        raise ValueError(args.mode)
+
     f.close()
-elif MODE == 'all':
-    directory = sys.argv[2]
 
-    extract_all(game, directory)
+main()
