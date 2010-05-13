@@ -1,4 +1,14 @@
 #!/usr/bin/env python3.1
+"""rby-sprite-extract.py - extract Pokemon sprites from a ROM image.
+
+BUGS
+
+* --color=gray doesn't work
+* formats don't work very well with extract_all
+
+
+"""
+
 import struct
 import io
 import sys
@@ -20,6 +30,14 @@ def bitflip(x, n):
     return r
 
 class Decompressor:
+    """ Pokemon sprite decompression for Gen I.
+
+    The overall structure of this decompressor was guided by
+    <http://www.magicstone.de/rhwiki/article/Grafikkomprimierung_PKMN_RGBY>,
+    while the nitty-gritty was filled in by
+    <http://www.upokecenter.com/projects/rbgfx.c>.
+
+    """
     table1 = [(2 << i) - 1 for i in range(16)]
 
     #table2 = [
@@ -295,8 +313,8 @@ class Image:
         }
         return formats[format](*args, **kw)
 
-    # PIL is not yet available for python 3, so we'll write out a pgm(5) file,
-    # and let netpbm(1) sort it out.
+    # PIL is not yet available for python 3, so we'll write out a ppm(5) or
+    # pgm(5) file and let netpbm(1) sort it out.
     def save_pam(self, out):
         def write(*args, **kw):
             print(*args, file=out, **kw)
@@ -676,14 +694,69 @@ def xmakedirs(path):
 
 
 
+
+def print_help(full=True):
+    prog = os.path.basename(sys.argv[0])
+    print("""\
+Usage: {prog} rompath pokemon {{front|back}} [options]
+       {prog} rompath -d directory [options]
+       {prog} --help
+""".format(prog=prog))
+
+    if not full:
+        sys.exit()
+
+    print("""\
+First form:
+    Extract a single sprite to stdout
+
+    rompath       - the path to the ROM
+    pokemon       - the id of the pokemon to extract
+    front | back  - frontsprite or backsprite?
+
+Second form:
+    Extract all sprites into a directory
+
+    rompath       - the path to the ROM
+    -d outdir
+    --directory=  - where to put the sprites
+
+
+Options:
+    -c, --color=   - which palette to use (gray/sgb/gbc)
+    -f, --format=  - which output format to use
+
+    --munge
+    --no-munge     - if munge is set, set the first palette entry of the
+                     SGB palettes to white.  (default: munge)
+
+Formats:
+    ppm     - the ppm(1) format from netpbm(1)
+    png     - the Portable Network Graphics format
+    boxes   - render using unicode boxes
+    xterm   - output color codes for a 256-color terminal
+
+""".format(prog=prog))
+
+    sys.exit()
+
 def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("rompath")
+    # this is sort of a hack
+    # and basically kills introspection for --help
+    parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("-d", "--directory", action="store_true")
+    parser.add_argument("-h", "--help", action="store_true")
+
+    if not sys.argv[1:]:
+        print_help(full=False)
 
     args, _ = parser.parse_known_args()
-    if args.directory:
-        parser_all = argparse.ArgumentParser()
+
+    if args.help:
+        print_help(full=True)
+
+    elif args.directory:
+        parser_all = argparse.ArgumentParser(add_help=False)
         parser_all.add_argument("rompath")
         parser_all.add_argument("-d", "--directory")
         parser_all.add_argument("-f", "--format", default="png")
@@ -692,7 +765,7 @@ def parse_args():
         parser_all.set_defaults(mode='all')
         return parser_all.parse_args()
     else:
-        parser_single = argparse.ArgumentParser()
+        parser_single = argparse.ArgumentParser(add_help=False)
         parser_single.add_argument("rompath")
         parser_single.add_argument("pokemon", type=int)
         parser_single.add_argument("facing", nargs='?', default='front')
