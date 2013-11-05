@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"bufio"
+	"bytes"
 	"fmt"
 	//"image"
 	//"image/color"
@@ -50,7 +50,7 @@ func (br *bitReader) ReadBits(n uint) uint8 {
 func (br *bitReader) ReadBits16(n uint) uint16 {
 	b := uint16(br.ReadBits(n))
 	if n > 8 {
-		b = b << 8 | uint16(br.ReadBits(n-8))
+		b = b<<8 | uint16(br.ReadBits(n-8))
 	}
 	return b
 }
@@ -87,8 +87,8 @@ func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 	width := int(r.ReadBits(4))
 	height := int(r.ReadBits(4))
 
-	data := make([]byte, width * height * 8 * 2)
-	mid := len(data)/2
+	data := make([]byte, width*height*8*2)
+	mid := len(data) / 2
 
 	s0 := data[:mid]
 	s1 := data[mid:]
@@ -101,7 +101,7 @@ func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 	if mode == 1 {
 		mode = 1 + r.ReadBits(1)
 	}
-	fillRam(r, s1) 
+	fillRam(r, s1)
 
 	copy(s0, deinterlace(s0, width, height))
 	copy(s1, deinterlace(s1, width, height))
@@ -163,10 +163,10 @@ func deinterlace(b []uint8, width, height int) []uint8 {
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			for tx := 0; tx < 8; tx++ {
-				shift := 6 - uint(tx)%4 * 2
+				shift := 6 - uint(tx)%4*2
 				for ty := 0; ty < 8; ty += 2 {
-					i := (y*8 + ty)*width + (x*8+tx)/4
-					w.WriteBits(2, b[i]>>shift & 3)
+					i := (y*8+ty)*width + (x*8+tx)/4
+					w.WriteBits(2, b[i]>>shift&3)
 				}
 			}
 		}
@@ -289,7 +289,7 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	f.Seek(13<< 14, 0)
+	f.Seek(13<<14, 0)
 	b, w, h := Decompress(bufio.NewReader(f))
 	fmt.Println("P5")
 	fmt.Println("40 40")
@@ -298,6 +298,6 @@ func main() {
 	b = untile(b, w, h)
 	br := bitReader{r: bytes.NewReader(b)}
 	for i := 0; i < w*h*64; i++ {
-		fmt.Printf("%c", 3 - br.ReadBits(2))
+		fmt.Printf("%c", 3-br.ReadBits(2))
 	}
 }
