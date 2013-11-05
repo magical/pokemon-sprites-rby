@@ -87,51 +87,51 @@ func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 	width := int(r.ReadBits(4))
 	height := int(r.ReadBits(4))
 
-	// Size in bytes
-	size := width * height * 8
+	data := make([]byte, width * height * 8 * 2)
+	mid := len(data)/2
 
-	var rams [2][]uint8
-	ramorder := r.ReadBits(1)
+	s0 := data[:mid]
+	s1 := data[mid:]
+	if r.ReadBits(1) == 1 {
+		s0, s1 = s1, s0
+	}
 
-	r1 := ramorder
-	r2 := ramorder ^ 1
-
-	rams[r1] = fillRam(r, rams[r1], size)
+	fillRam(r, s0)
 	mode := r.ReadBits(1)
 	if mode == 1 {
 		mode = 1 + r.ReadBits(1)
 	}
-	rams[r2] = fillRam(r, rams[r2], size)
+	fillRam(r, s1) 
 
-	rams[r1] = deinterlace(rams[r1], width, height)
-	rams[r2] = deinterlace(rams[r2], width, height)
+	copy(s0, deinterlace(s0, width, height))
+	copy(s1, deinterlace(s1, width, height))
 
 	switch mode {
 	case 0:
-		thing1(rams[0], width, height)
-		thing1(rams[1], width, height)
+		thing1(s0, width, height)
+		thing1(s1, width, height)
 	case 1:
-		thing1(rams[r1], width, height)
-		thing2(rams[r1], rams[r2])
+		thing1(s0, width, height)
+		thing2(s0, s1)
 	case 2:
-		thing1(rams[r2], width, height)
-		thing1(rams[r1], width, height)
-		thing2(rams[r1], rams[r2])
+		thing1(s1, width, height)
+		thing1(s0, width, height)
+		thing2(s0, s1)
 	}
 
-	for i := range rams[0] {
-		x := mingle(uint16(rams[0][i]), uint16(rams[1][i]))
+	for i := 0; i < mid; i++ {
+		x := mingle(uint16(data[i]), uint16(data[mid+i]))
 		b = append(b, uint8(x>>8), uint8(x))
 	}
 	return b, width, height
 }
 
-func fillRam(r *bitReader, b []uint8, size int) []uint8{
-	w := bitWriter{b: b}
+func fillRam(r *bitReader, b []uint8) {
+	w := bitWriter{b: b[:0]}
 	if r.ReadBits(1) == 0 {
 		readRle(r, &w)
 	}
-	for w.Len() < size {
+	for w.Len() < len(b) {
 		px := r.ReadBits(2)
 		if px != 0 {
 			w.WriteBits(2, px)
@@ -139,10 +139,9 @@ func fillRam(r *bitReader, b []uint8, size int) []uint8{
 			readRle(r, &w)
 		}
 	}
-	if w.Len() > size {
-		log.Panicf("read too much data: %v vs %v (w.n: %v) %v", w.Len(), size, w.n)
+	if w.Len() > len(b) {
+		log.Panicf("read too much data: %v vs %v (w.n: %v) %v", w.Len(), len(b), w.n)
 	}
-	return w.b
 }
 
 func readRle(r *bitReader, w *bitWriter) {
