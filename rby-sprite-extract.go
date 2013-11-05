@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"bufio"
 	"fmt"
 	//"image"
@@ -11,7 +12,7 @@ import (
 	"os"
 )
 
-// table[i] = i ^ ((nextPowerOfTwo(i+1) - 1) >> 1)
+// Each bit is xored with the next bit.
 var table = [2][16]uint8{
 	{0, 1, 3, 2, 7, 6, 4, 5, 15, 14, 12, 13, 8, 9, 11, 10},
 	{15, 14, 12, 13, 8, 9, 11, 10, 0, 1, 3, 2, 7, 6, 4, 5},
@@ -70,7 +71,6 @@ func (bw *bitWriter) Len() int {
 }
 
 func (bw *bitWriter) WriteBits(n uint, bits0 uint8) {
-	//bits = bits & uint8(1<<n - 1)
 	bw.bits = bw.bits<<n | uint32(bits0)
 	bw.n += n
 	for bw.n >= 8 {
@@ -81,16 +81,14 @@ func (bw *bitWriter) WriteBits(n uint, bits0 uint8) {
 
 //const TileSize = 8
 
-func Decompress(reader io.ByteReader) (b []uint8) {
+func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 	r := &bitReader{r: reader}
 
-	// TODO make these make sense
-	sizex := int(r.ReadBits(4)) * 8
-	sizey := int(r.ReadBits(4))
+	width := int(r.ReadBits(4))
+	height := int(r.ReadBits(4))
 
-	//fmt.Println("size:", sizex, sizey)
-
-	size := sizex * sizey
+	// Size in bytes
+	size := width * height * 8
 
 	var rams [2][]uint8
 	ramorder := r.ReadBits(1)
@@ -105,19 +103,19 @@ func Decompress(reader io.ByteReader) (b []uint8) {
 	}
 	rams[r2] = fillRam(r, rams[r2], size)
 
-	rams[r1] = deinterlace(rams[r1], sizex, sizey)
-	rams[r2] = deinterlace(rams[r2], sizex, sizey)
+	rams[r1] = deinterlace(rams[r1], width, height)
+	rams[r2] = deinterlace(rams[r2], width, height)
 
 	switch mode {
 	case 0:
-		thing1(rams[0], sizex, sizey)
-		thing1(rams[1], sizex, sizey)
+		thing1(rams[0], width, height)
+		thing1(rams[1], width, height)
 	case 1:
-		thing1(rams[r1], sizex, sizey)
+		thing1(rams[r1], width, height)
 		thing2(rams[r1], rams[r2])
 	case 2:
-		thing1(rams[r2], sizex, sizey)
-		thing1(rams[r1], sizex, sizey)
+		thing1(rams[r2], width, height)
+		thing1(rams[r1], width, height)
 		thing2(rams[r1], rams[r2])
 	}
 
@@ -125,7 +123,7 @@ func Decompress(reader io.ByteReader) (b []uint8) {
 		x := mingle(uint16(rams[0][i]), uint16(rams[1][i]))
 		b = append(b, uint8(x>>8), uint8(x))
 	}
-	return b
+	return b, width, height
 }
 
 func fillRam(r *bitReader, b []uint8, size int) []uint8{
@@ -161,26 +159,28 @@ func readRle(r *bitReader, w *bitWriter) {
 	}
 }
 
-func deinterlace(b []uint8, sizex, sizey int) []uint8 {
+func deinterlace(b []uint8, width, height int) []uint8 {
 	w := bitWriter{b: nil}
-	for y := 0; y < sizey; y++ {
-		for x := 0; x < sizex; x++ {
-			i := y*sizex + x/4
-			shift := 6 - uint(x) * 2 % 8
-			w.WriteBits(2, b[i+sizex*0/4]>>shift & 3)
-			w.WriteBits(2, b[i+sizex*1/4]>>shift & 3)
-			w.WriteBits(2, b[i+sizex*2/4]>>shift & 3)
-			w.WriteBits(2, b[i+sizex*3/4]>>shift & 3)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			for tx := 0; tx < 8; tx++ {
+				shift := 6 - uint(tx)%4 * 2
+				for ty := 0; ty < 8; ty += 2 {
+					i := (y*8 + ty)*width + (x*8+tx)/4
+					w.WriteBits(2, b[i]>>shift & 3)
+				}
+			}
 		}
 	}
 	return w.b
 }
 
-func thing1(b []uint8, sizex, sizey int) {
-	for x := 0; x < sizex; x++ {
+func thing1(b []uint8, width, height int) {
+	// XXX Why is this column-wise? That doesn't make any sense.
+	for x := 0; x < width*8; x++ {
 		bit := uint8(0)
-		for y := 0; y < sizey; y++ {
-			i := y*sizex + x
+		for y := 0; y < height; y++ {
+			i := y*8*width + x
 			m := b[i] >> 4
 			n := b[i] & 0xf
 
@@ -272,20 +272,13 @@ func getBank(n int) int {
 	}
 }
 
-func untile(b []uint8) (out []uint8) {
-	for x := 0; x < 40; x++ {
-		for y := 0; y < 5; y++ {
-			i := (y * 40 + x) * 2
-			out = append(out,
-				b[i]>>6 & 3,
-				b[i]>>4 & 3,
-				b[i]>>2 & 3,
-				b[i]>>0 & 3,
-				b[i+1]>>6 & 3,
-				b[i+1]>>4 & 3,
-				b[i+1]>>2 & 3,
-				b[i+1]>>0 & 3,
-			)
+// Untile a 2bpp image.
+func untile(b []uint8, w, h int) (out []uint8) {
+	// XXX This seems too easy
+	for x := 0; x < w*8; x++ {
+		for y := 0; y < h; y++ {
+			i := (y*8*w + x) * 2
+			out = append(out, b[i], b[i+1])
 		}
 	}
 	return
@@ -298,12 +291,14 @@ func main() {
 		return
 	}
 	f.Seek(13<< 14, 0)
-	b := Decompress(bufio.NewReader(f))
+	b, w, h := Decompress(bufio.NewReader(f))
 	fmt.Println("P5")
 	fmt.Println("40 40")
 	fmt.Println("3")
 	//fmt.Printf("%x\n", b);
-	for _, x := range untile(b) {
-		fmt.Printf("%c", 3 - x)
+	b = untile(b, w, h)
+	br := bitReader{r: bytes.NewReader(b)}
+	for i := 0; i < w*h*64; i++ {
+		fmt.Printf("%c", 3 - br.ReadBits(2))
 	}
 }
