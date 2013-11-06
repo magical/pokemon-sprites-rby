@@ -12,7 +12,7 @@ import (
 	"os"
 )
 
-// Each bit is xored with the next bit.
+// This is the inverse of (i xor i>>1).
 var table = [2][16]uint8{
 	{0, 1, 3, 2, 7, 6, 4, 5, 15, 14, 12, 13, 8, 9, 11, 10},
 	{15, 14, 12, 13, 8, 9, 11, 10, 0, 1, 3, 2, 7, 6, 4, 5},
@@ -159,13 +159,15 @@ func readRle(r *bitReader, w *bitWriter) {
 }
 
 func deinterlace(b []uint8, width, height int) []uint8 {
+	// out[x][y][ty][tx] = in[x][tx][y][ty]
 	w := bitWriter{b: nil}
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			for tx := 0; tx < 8; tx++ {
-				shift := 6 - uint(tx)%4*2
-				for ty := 0; ty < 8; ty += 2 {
-					i := (y*8+ty)*width + (x*8+tx)/4
+	for x := 0; x < width; x++ {
+		for y := 0; y < height; y++ {
+			for ty := 0; ty < 8; ty++ {
+				// Something weird is going on here
+				shift := 6 - uint(ty)%4*2
+				for tx := 0; tx < 8; tx += 2 {
+					i := (x*8+tx)*height + (y*8+ty)/4
 					w.WriteBits(2, b[i]>>shift&3)
 				}
 			}
@@ -175,21 +177,23 @@ func deinterlace(b []uint8, width, height int) []uint8 {
 }
 
 func thing1(b []uint8, width, height int) {
-	// XXX Why is this column-wise? That doesn't make any sense.
-	for x := 0; x < width*8; x++ {
-		bit := uint8(0)
-		for y := 0; y < height; y++ {
-			i := y*8*width + x
-			m := b[i] >> 4
-			n := b[i] & 0xf
+	// b[x][y][ty][tx]
+	for y := 0; y < height; y++ {
+		for ty := 0; ty < 8; ty++ {
+			bit := uint8(0)
+			for x := 0; x < width; x++ {
+				i := x*8*height + y*8+ty
+				m := b[i] >> 4
+				n := b[i] & 0xf
 
-			m = table[bit][m]
-			bit = m & 1
+				m = table[bit][m]
+				bit = m & 1
 
-			n = table[bit][n]
-			bit = n & 1
+				n = table[bit][n]
+				bit = n & 1
 
-			b[i] = m<<4 | n
+				b[i] = m<<4 | n
+			}
 		}
 	}
 }
@@ -214,18 +218,20 @@ func mingle(x, y uint16) (z uint16) {
 	return
 }
 
-/*
-func untile(b []uint8, sizex, sizey int) []uint8 {
-	out := make([]uint8, 0, len(b))
-	for x := 0; x < sizex; x++ {
-		for y := 0; y < sizey; y++ {
-			i := y*sizex + x
-			out = append(out, b[i*2], b[i*2+1])
+// Untile a 2bpp image.
+func untile(b []uint8, w, h int) (out []uint8) {
+	// out[y][ty][x][tx] = in[x][y][ty][tx]
+	// XXX This seems too easy
+	for y := 0; y < h; y++ {
+		for ty := 0; ty < 8; ty++ {
+			for x := 0; x < w; x++ {
+				i := (y*8+ty + x*h*8) * 2
+				out = append(out, b[i], b[i+1])
+			}
 		}
 	}
-	return out
+	return
 }
-*/
 
 type romInfo struct {
 	StatsPos      uint32
@@ -271,18 +277,6 @@ func getBank(n int) int {
 	}
 }
 
-// Untile a 2bpp image.
-func untile(b []uint8, w, h int) (out []uint8) {
-	// XXX This seems too easy
-	for x := 0; x < w*8; x++ {
-		for y := 0; y < h; y++ {
-			i := (y*8*w + x) * 2
-			out = append(out, b[i], b[i+1])
-		}
-	}
-	return
-}
-
 func main() {
 	f, err := os.Open("red.gb")
 	if err != nil {
@@ -292,7 +286,7 @@ func main() {
 	f.Seek(13<<14, 0)
 	b, w, h := Decompress(bufio.NewReader(f))
 	fmt.Println("P5")
-	fmt.Println("40 40")
+	fmt.Println(w*8, h*8)
 	fmt.Println("3")
 	//fmt.Printf("%x\n", b);
 	b = untile(b, w, h)
