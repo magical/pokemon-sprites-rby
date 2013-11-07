@@ -2,15 +2,40 @@ package main
 
 import (
 	"bufio"
-	"bytes"
+	//"bytes"
 	"fmt"
-	//"image"
-	//"image/color"
-	//"image/png"
 	"io"
 	"log"
 	"os"
+
+	//"image"
+	//"image/color"
+	//"image/png"
 )
+
+/*
+
+Okay, so. Let's start at the beginning. The gameboy, like its successors,
+works with 8x8 pixel tiles. Tiles are stored in rows of pixels, 2 bits per
+pixel, 2 bytes per row. Strangely, the low and high bits of each row are
+divided between the two bytes: the first byte stores the low bits and the
+second the high bits. The high-endian bit is the first pixel.
+
+The compression scheme used for pokemon images starts by further splitting the
+low and high bits into two completely separate images. These halves are
+eventually stored with zeros run-length encoded, so the compression methods
+are aimed at getting many consecutive zeros.
+
+The first method is to xor each row of one of the halves with itself shifted
+by one bit.
+
+The second method is to xor one of the halves with the other.
+
+Note: The way the game does the decompression, it ends up with an image whose
+tiles have been transposed. This is unnecessary and, in fact, makes the job
+harder. It is easier not to mess around with tiles at all.
+
+*/
 
 // This is the inverse of (i xor i>>1).
 var table = [2][16]uint8{
@@ -103,6 +128,11 @@ func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 	}
 	fillRam(r, s1)
 
+	if r.Err() != nil {
+		//TODO better error handling
+		panic(r.Err())
+	}
+
 	copy(s0, deinterlace(s0, width, height))
 	copy(s1, deinterlace(s1, width, height))
 
@@ -121,7 +151,9 @@ func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 
 	for i := 0; i < mid; i++ {
 		x := mingle(uint16(data[i]), uint16(data[mid+i]))
-		b = append(b, uint8(x>>8), uint8(x))
+		for shift := uint(0); shift < 16; shift += 2 {
+			b = append(b, uint8(x>>(14-shift))&3)
+		}
 	}
 	return b, width, height
 }
@@ -159,45 +191,45 @@ func readRle(r *bitReader, w *bitWriter) {
 }
 
 func deinterlace(b []uint8, width, height int) []uint8 {
-	// out[x][y][ty][tx] = in[x][tx][y][ty]
+	// The compressed image is not stored in tiles, and it is stored with
+	// its rows interleaved; two bits from the first row, two bits from
+	// the second row, and so on, in effect almost transposing the image.
+	// This seems pointless.
 	w := bitWriter{b: nil}
-	for x := 0; x < width; x++ {
-		for y := 0; y < height; y++ {
-			for ty := 0; ty < 8; ty++ {
-				// Something weird is going on here
-				shift := 6 - uint(ty)%4*2
-				for tx := 0; tx < 8; tx += 2 {
-					i := (x*8+tx)*height + (y*8+ty)/4
-					w.WriteBits(2, b[i]>>shift&3)
-				}
-			}
+	for y := 0; y < height*8; y++ {
+		shift := 6 - uint(y)%4*2
+		for x := 0; x < width*8; x += 2 {
+			i := x*height + y/4
+			w.WriteBits(2, b[i]>>shift&3)
 		}
 	}
 	return w.b
 }
 
+// This function undoes the operation of xoring each row with itself shifted
+// to the left.
 func thing1(b []uint8, width, height int) {
-	// b[x][y][ty][tx]
-	for y := 0; y < height; y++ {
-		for ty := 0; ty < 8; ty++ {
-			bit := uint8(0)
-			for x := 0; x < width; x++ {
-				i := x*8*height + y*8+ty
-				m := b[i] >> 4
-				n := b[i] & 0xf
+	stride := width
+	for y := 0; y < height*8; y++ {
+		bit := uint8(0)
+		for x := 0; x < width; x++ {
+			i := y*stride + x
 
-				m = table[bit][m]
-				bit = m & 1
+			m := b[i] >> 4
+			n := b[i] & 0xf
 
-				n = table[bit][n]
-				bit = n & 1
+			m = table[bit][m]
+			bit = m & 1
 
-				b[i] = m<<4 | n
-			}
+			n = table[bit][n]
+			bit = n & 1
+
+			b[i] = m<<4 | n
 		}
 	}
 }
 
+// This function xors each byte of b and d, storing the result in d.
 func thing2(b, d []uint8) {
 	for i := range d {
 		// if mirror {}
@@ -215,21 +247,6 @@ func mingle(x, y uint16) (z uint16) {
 	y = (y | y<<1) & 0x5555
 
 	z = x | y<<1
-	return
-}
-
-// Untile a 2bpp image.
-func untile(b []uint8, w, h int) (out []uint8) {
-	// out[y][ty][x][tx] = in[x][y][ty][tx]
-	// XXX This seems too easy
-	for y := 0; y < h; y++ {
-		for ty := 0; ty < 8; ty++ {
-			for x := 0; x < w; x++ {
-				i := (y*8+ty + x*h*8) * 2
-				out = append(out, b[i], b[i+1])
-			}
-		}
-	}
 	return
 }
 
@@ -284,14 +301,13 @@ func main() {
 		return
 	}
 	f.Seek(13<<14, 0)
-	b, w, h := Decompress(bufio.NewReader(f))
+	r := bufio.NewReader(f)
+	b, w, h := Decompress(r)
 	fmt.Println("P5")
 	fmt.Println(w*8, h*8)
 	fmt.Println("3")
 	//fmt.Printf("%x\n", b);
-	b = untile(b, w, h)
-	br := bitReader{r: bytes.NewReader(b)}
-	for i := 0; i < w*h*64; i++ {
-		fmt.Printf("%c", 3-br.ReadBits(2))
+	for i := range b {
+		fmt.Printf("%c", 3-b[i])
 	}
 }
