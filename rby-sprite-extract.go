@@ -37,12 +37,6 @@ harder. It is easier not to mess around with tiles at all.
 
 */
 
-// This is the inverse of (i xor i>>1).
-var table = [2][16]uint8{
-	{0, 1, 3, 2, 7, 6, 4, 5, 15, 14, 12, 13, 8, 9, 11, 10},
-	{15, 14, 12, 13, 8, 9, 11, 10, 0, 1, 3, 2, 7, 6, 4, 5},
-}
-
 type bitReader struct {
 	r     io.ByteReader
 	bits  uint16
@@ -104,8 +98,6 @@ func (bw *bitWriter) WriteBits(n uint, bits0 uint8) {
 	}
 }
 
-//const TileSize = 8
-
 func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 	r := &bitReader{r: reader}
 
@@ -133,20 +125,24 @@ func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 		panic(r.Err())
 	}
 
-	copy(s0, deinterlace(s0, width, height))
-	copy(s1, deinterlace(s1, width, height))
+	copy(s0, deinterleave(s0, width, height))
+	copy(s1, deinterleave(s1, width, height))
 
 	switch mode {
 	case 0:
-		thing1(s0, width, height)
-		thing1(s1, width, height)
+		unxor(s0, width, height)
+		unxor(s1, width, height)
 	case 1:
-		thing1(s0, width, height)
-		thing2(s0, s1)
+		unxor(s0, width, height)
+		for i := range s1 {
+			s1[i] ^= s0[i]
+		}
 	case 2:
-		thing1(s1, width, height)
-		thing1(s0, width, height)
-		thing2(s0, s1)
+		unxor(s1, width, height)
+		unxor(s0, width, height)
+		for i := range s1 {
+			s1[i] ^= s0[i]
+		}
 	}
 
 	for i := 0; i < mid; i++ {
@@ -190,7 +186,7 @@ func readRle(r *bitReader, w *bitWriter) {
 	}
 }
 
-func deinterlace(b []uint8, width, height int) []uint8 {
+func deinterleave(b []uint8, width, height int) []uint8 {
 	// The compressed image is not stored in tiles, and it is stored with
 	// its rows interleaved; two bits from the first row, two bits from
 	// the second row, and so on, in effect almost transposing the image.
@@ -206,34 +202,27 @@ func deinterlace(b []uint8, width, height int) []uint8 {
 	return w.b
 }
 
-// This function undoes the operation of xoring each row with itself shifted
-// to the left.
-func thing1(b []uint8, width, height int) {
+var invXorShift [256]uint8
+
+func init() {
+	for i := uint(0); i < 256; i++ {
+		invXorShift[i^(i>>1)] = uint8(i)
+	}
+}
+
+// Unxor performs the inverse of (row ^ row>>1) on each row of b.
+func unxor(b []uint8, width, height int) {
 	stride := width
 	for y := 0; y < height*8; y++ {
 		bit := uint8(0)
 		for x := 0; x < width; x++ {
 			i := y*stride + x
-
-			m := b[i] >> 4
-			n := b[i] & 0xf
-
-			m = table[bit][m]
-			bit = m & 1
-
-			n = table[bit][n]
-			bit = n & 1
-
-			b[i] = m<<4 | n
+			b[i] = invXorShift[b[i]]
+			if bit != 0 {
+				b[i] = ^b[i]
+			}
+			bit = b[i] & 1
 		}
-	}
-}
-
-// This function xors each byte of b and d, storing the result in d.
-func thing2(b, d []uint8) {
-	for i := range d {
-		// if mirror {}
-		d[i] ^= b[i]
 	}
 }
 
