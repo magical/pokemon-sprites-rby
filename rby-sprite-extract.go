@@ -2,13 +2,12 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"os"
 
-	//"image"
+	"image"
 	//"image/color"
 	//"image/png"
 )
@@ -105,11 +104,15 @@ func (bw *bitWriter) WriteBits(n uint, bits0 uint8) {
 	}
 }
 
-func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
+// Decode reads a compressed pokemon image and returns it as an
+// image.Paletted.
+func Decode(reader io.ByteReader) (image.Image, error) {
 	r := &bitReader{r: reader}
 
 	width := int(r.ReadBits(4))
 	height := int(r.ReadBits(4))
+
+	m := image.NewPaletted(image.Rect(0, 0, width*8, height*8), nil)
 
 	data := make([]byte, width*height*8*2)
 	mid := len(data) / 2
@@ -128,8 +131,7 @@ func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 	readData(r, s1, width, height)
 
 	if r.Err() != nil {
-		//TODO better error handling
-		panic(r.Err())
+		return nil, r.Err()
 	}
 
 	switch mode {
@@ -149,13 +151,14 @@ func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 		}
 	}
 
+	b := m.Pix[:0]
 	for i := 0; i < mid; i++ {
 		x := mingle(uint16(data[i]), uint16(data[mid+i]))
 		for shift := uint(0); shift < 16; shift += 2 {
 			b = append(b, uint8(x>>(14-shift))&3)
 		}
 	}
-	return b, width, height
+	return m, nil
 }
 
 // ReadData reads, expands, and deinterleaves compressed pixel data.
@@ -300,12 +303,16 @@ func main() {
 	}
 	f.Seek(13<<14, 0)
 	r := bufio.NewReader(f)
-	b, w, h := Decompress(r)
+	m, err := Decode(r)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	p := m.(*image.Paletted)
 	fmt.Println("P5")
-	fmt.Println(w*8, h*8)
+	fmt.Println(m.Bounds().Dx(), m.Bounds().Dy())
 	fmt.Println("3")
-	//fmt.Printf("%x\n", b);
-	for i := range b {
-		fmt.Printf("%c", 3-b[i])
+	for i := range p.Pix {
+		fmt.Printf("%c", 3-p.Pix[i])
 	}
 }
