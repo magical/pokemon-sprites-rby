@@ -12,6 +12,7 @@ import (
 
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 )
 
@@ -361,6 +362,13 @@ var grayPalette = color.Palette{
 	color.Gray{0},
 }
 
+var gameboyPalette = color.Palette{
+	color.NRGBA{0x9B, 0xBC, 0x0F, 0xFF},
+	color.NRGBA{0x8B, 0xAC, 0x0F, 0xFF},
+	color.NRGBA{0x30, 0x62, 0x30, 0xFF},
+	color.NRGBA{0x0F, 0x28, 0x0F, 0xFF},
+}
+
 func main() {
 	f, err := os.Open("red.gb")
 	if err != nil {
@@ -372,6 +380,8 @@ func main() {
 		fmt.Println(err)
 		return
 	}
+	montage(z, os.Stdout)
+	/*
 	m, err := z.Sprite(1)
 	if err != nil {
 		fmt.Println(err)
@@ -380,4 +390,25 @@ func main() {
 	p := m.(*image.Paletted)
 	p.Palette = grayPalette
 	png.Encode(os.Stdout, m)
+	*/
+}
+
+func montage(z *ripper, w io.Writer) {
+	m := image.NewPaletted(image.Rect(0, 0, 56*15, 56*150/15), gameboyPalette)
+	tile := image.Rect(0, 0, 56, 56)
+	//draw.Draw(m, m.Bounds(), image.White, image.ZP, draw.Src)
+	for i := 0; i < 150; i++ {
+		spr, err := z.Sprite(i+1)
+		if err != nil {
+			log.Printf("error getting pokemon %d: %v", i, err)
+		}
+		p := spr.(*image.Paletted)
+		p.Palette = gameboyPalette
+		padding := tile.Size().Sub(p.Rect.Size()).Div(2)
+		p.Rect = p.Rect.Add(padding)
+		row := i / 15
+		col := i % 15
+		draw.Draw(m, tile.Add(image.Pt(col, row).Mul(56)), p, image.ZP, draw.Src)
+	}
+	png.Encode(w, m)
 }
