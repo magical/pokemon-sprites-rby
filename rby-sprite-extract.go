@@ -261,6 +261,15 @@ func newRipper(f *os.File) (*ripper, error) {
 		return nil, err
 	}
 
+	header := rom[:0x150]
+	title := string(bytes.TrimRight(header[0x134:0x143], "\x00"))
+	isJP := rom[0x14A] == 0
+
+	getBank := getBankRBY
+	if isJP && (title == "POKEMON RED" || title == "POKEMON GREEN") {
+		getBank = getBankRG
+	}
+
 	// Read pokedex order
 	pos := bytes.Index(rom, pokedexOrderBytes)
 	if pos < 0 {
@@ -271,8 +280,6 @@ func newRipper(f *os.File) (*ripper, error) {
 	for i, n := range rom[pos : pos+0xbe] {
 		internalId[int(n)] = i + 1
 	}
-
-	getBank := getBankEN
 
 	// Read sprite pointers
 	pos = bytes.Index(rom, bulbasaurStats)
@@ -296,7 +303,7 @@ func newRipper(f *os.File) (*ripper, error) {
 		GrowthRate uint8
 		TMs        [8]uint8
 	}
-	err = binary.Read(f, binary.LittleEndian, stats[:150])
+	err = binary.Read(f, binary.LittleEndian, stats[:])
 	if err != nil {
 		return nil, err
 	}
@@ -305,6 +312,22 @@ func newRipper(f *os.File) (*ripper, error) {
 		base := int64(bank-1)<<14
 		z.spritePos[i].front = base + int64(s.FrontSpritePointer)
 		z.spritePos[i].back = base + int64(s.BackSpritePointer)
+	}
+
+	// Find Mew if missing
+	if stats[150].N != 151 {
+		pos = bytes.Index(rom, mewStats)
+		if pos < 0 {
+			return nil, fmt.Errorf("Couldn't find Mew's stats")
+		}
+		f.Seek(int64(pos), 0)
+		s := &stats[150]
+		err = binary.Read(f, binary.LittleEndian, s)
+		if err != nil {
+			return nil, err
+		}
+		z.spritePos[150].front = int64(s.FrontSpritePointer)
+		z.spritePos[150].back = int64(s.BackSpritePointer)
 	}
 
 	// Read palettes
@@ -319,11 +342,9 @@ func (z *ripper) Sprite(n int) (image.Image, error) {
 	return Decode(z.f)
 }
 
-// GetBankJP returns the bank containg the graphics for pokemon n.
-func getBankJP(n int) int {
+// GetBankRG returns the bank containg the graphics for pokemon n.
+func getBankRG(n int) int {
 	switch {
-	case n == 0xb6:
-		return 0xb
 	case n < 0x1f:
 		return 0x9
 	case n < 0x4a:
@@ -337,11 +358,8 @@ func getBankJP(n int) int {
 	}
 }
 
-func getBankEN(n int) int {
+func getBankRBY(n int) int {
 	switch {
-	case n == 0xb6:
-		// Mew
-		return 0xb
 	case n < 0x1f:
 		return 0x9
 	case n < 0x4a:
@@ -394,10 +412,10 @@ func main() {
 }
 
 func montage(z *ripper, w io.Writer) {
-	m := image.NewPaletted(image.Rect(0, 0, 56*15, 56*150/15), gameboyPalette)
+	m := image.NewPaletted(image.Rect(0, 0, 56*15, 56*(151+14)/15), gameboyPalette)
 	tile := image.Rect(0, 0, 56, 56)
 	//draw.Draw(m, m.Bounds(), image.White, image.ZP, draw.Src)
-	for i := 0; i < 150; i++ {
+	for i := 0; i < 151; i++ {
 		spr, err := z.Sprite(i+1)
 		if err != nil {
 			log.Printf("error getting pokemon %d: %v", i, err)
