@@ -2,8 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 
@@ -86,8 +89,8 @@ func (br *bitReader) Err() error {
 
 // Decode reads a compressed pokemon image and returns it as an
 // image.Paletted.
-func Decode(reader io.ByteReader) (image.Image, error) {
-	r := &bitReader{r: reader}
+func Decode(reader io.Reader) (image.Image, error) {
+	r := &bitReader{r: bufio.NewReader(reader)}
 
 	width := int(r.ReadBits(4))
 	height := int(r.ReadBits(4))
@@ -190,7 +193,7 @@ func readUint16(r *bitReader) (n uint16) {
 		e += 1
 	}
 
-	n = uint16(uint(1)<<e - 1) + r.ReadBits16(e)
+	n = uint16(uint(1)<<e-1) + r.ReadBits16(e)
 	return n
 }
 
@@ -231,12 +234,88 @@ func mingle(x, y uint16) (z uint16) {
 	return
 }
 
-type romInfo struct {
-	StatsPos      uint32
-	MewPos        uint32
-	OrderPos      uint32
-	PalettePos    uint32
-	PaletteMapPos uint32
+//
+
+var (
+	bulbasaurStats    = []byte{1, 0x2D, 0x31, 0x31, 0x2D, 0x41}
+	mewStats          = []byte{151, 100, 100, 100, 100, 100}
+	pokedexOrderBytes = []byte{0x70, 0x73, 0x20, 0x23, 0x15, 0x64, 0x22, 0x50}
+	paletteMapBytes   = []byte{16, 22, 22, 22, 18, 18, 18, 19, 19, 19}
+)
+
+type ripper struct {
+	f *os.File
+	spritePos [151]struct{
+		front int64
+		back int64
+	}
+}
+
+func newRipper(f *os.File) (*ripper, error) {
+	z := new(ripper)
+	z.f = f
+
+	rom, err := ioutil.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read pokedex order
+	pos := bytes.Index(rom, pokedexOrderBytes)
+	if pos < 0 {
+		return nil, fmt.Errorf("Couldn't find pokedex order")
+	}
+
+	internalId := make(map[int]int)
+	for i, n := range rom[pos : pos+0xbe] {
+		internalId[int(n)] = i + 1
+	}
+
+	getBank := getBankEN
+
+	// Read sprite pointers
+	pos = bytes.Index(rom, bulbasaurStats)
+	if pos < 0 {
+		return nil, fmt.Errorf("Couldn't find Bulbasaur's stats")
+	}
+
+	f.Seek(int64(pos), 0)
+	var stats [151]struct {
+		N         uint8
+		Stats     [5]uint8
+		Types     [2]uint8
+		CatchRate uint8
+		ExpYield  uint8
+
+		SpriteSize         uint8
+		FrontSpritePointer uint16
+		BackSpritePointer  uint16
+
+		Attacks    [4]uint8
+		GrowthRate uint8
+		TMs        [8]uint8
+	}
+	err = binary.Read(f, binary.LittleEndian, stats[:150])
+	if err != nil {
+		return nil, err
+	}
+	for i, s := range stats {
+		bank := getBank(internalId[int(s.N)])
+		base := int64(bank-1)<<14
+		z.spritePos[i].front = base + int64(s.FrontSpritePointer)
+		z.spritePos[i].back = base + int64(s.BackSpritePointer)
+	}
+
+	// Read palettes
+	//
+
+	return z, nil
+}
+
+func (z *ripper) Sprite(n int) (image.Image, error) {
+	ptr := z.spritePos[n-1].front
+	z.f.Seek(ptr, 0)
+	return Decode(z.f)
 }
 
 // GetBankJP returns the bank containg the graphics for pokemon n.
@@ -257,7 +336,7 @@ func getBankJP(n int) int {
 	}
 }
 
-func getBank(n int) int {
+func getBankEN(n int) int {
 	switch {
 	case n == 0xb6:
 		// Mew
@@ -288,9 +367,12 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	f.Seek(13<<14, 0)
-	r := bufio.NewReader(f)
-	m, err := Decode(r)
+	z, err := newRipper(f)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	m, err := z.Sprite(1)
 	if err != nil {
 		fmt.Println(err)
 		return
