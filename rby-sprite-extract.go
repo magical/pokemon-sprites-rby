@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	//"bytes"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -191,15 +191,21 @@ func deinterleave(b []uint8, width, height int) []uint8 {
 	// its rows interleaved; two bits from the first row, two bits from
 	// the second row, and so on, in effect almost transposing the image.
 	// This seems pointless.
-	w := bitWriter{b: nil}
-	for y := 0; y < height*8; y++ {
-		shift := 6 - uint(y)%4*2
-		for x := 0; x < width*8; x += 2 {
-			i := x*height + y/4
-			w.WriteBits(2, b[i]>>shift&3)
+	r := bitReader{r: bytes.NewReader(b)}
+	out := make([]uint8, len(b))
+	for x := 0; x < width; x++ {
+		for shift := uint(8); shift > 0; {
+			shift -= 2
+			for y := 0; y < height*8; y++ {
+				i := y*width + x
+				out[i] |= r.ReadBits(2) << shift
+			}
 		}
 	}
-	return w.b
+	if r.Err() != nil {
+		panic(r.Err())
+	}
+	return out
 }
 
 var invXorShift [256]uint8
