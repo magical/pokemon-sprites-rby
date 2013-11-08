@@ -84,26 +84,6 @@ func (br *bitReader) Err() error {
 	return br.err
 }
 
-// Big-endian bit writer
-type bitWriter struct {
-	b    []uint8
-	n    uint
-	bits uint32
-}
-
-func (bw *bitWriter) Len() int {
-	return len(bw.b)
-}
-
-func (bw *bitWriter) WriteBits(n uint, bits0 uint8) {
-	bw.bits = bw.bits<<n | uint32(bits0)
-	bw.n += n
-	for bw.n >= 8 {
-		bw.b = append(bw.b, uint8(bw.bits>>(bw.n-8)))
-		bw.n -= 8
-	}
-}
-
 // Decode reads a compressed pokemon image and returns it as an
 // image.Paletted.
 func Decode(reader io.ByteReader) (image.Image, error) {
