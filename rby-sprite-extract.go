@@ -8,8 +8,8 @@ import (
 	"os"
 
 	"image"
-	//"image/color"
-	//"image/png"
+	"image/color"
+	"image/png"
 )
 
 /*
@@ -275,6 +275,13 @@ func getBank(n int) int {
 	}
 }
 
+var grayPalette = color.Palette{
+	color.Gray{255},
+	color.Gray{170},
+	color.Gray{85},
+	color.Gray{0},
+}
+
 func main() {
 	f, err := os.Open("red.gb")
 	if err != nil {
@@ -289,10 +296,6 @@ func main() {
 		return
 	}
 	p := m.(*image.Paletted)
-	fmt.Println("P5")
-	fmt.Println(m.Bounds().Dx(), m.Bounds().Dy())
-	fmt.Println("3")
-	for i := range p.Pix {
-		fmt.Printf("%c", 3-p.Pix[i])
-	}
+	p.Palette = grayPalette
+	png.Encode(os.Stdout, m)
 }
