@@ -26,10 +26,17 @@ low and high bits into two completely separate images. These halves are
 eventually stored with zeros run-length encoded, so the compression methods
 are aimed at getting many consecutive zeros.
 
-The first method is to xor each row of one of the halves with itself shifted
-by one bit.
+The first option is to xor one of the halves with the other. Since the high
+bits and low bits are likely to be correlated, this can wipe out a lot of
+redundant bits.
 
-The second method is to xor one of the halves with the other.
+The second option is to exploit row-level redundancy in either or both of the
+halves by xoring each pixel with the previous one. (Remember that at this
+point, each pixel is a single bit).
+
+The halves are stored separately, and they are stored they are stored with
+rows interleaved; two bits from the first row, two bits from the second row,
+and so on, in effect almost transposing the image. This seems pointless.
 
 Note: The way the game does the decompression, it ends up with an image whose
 tiles have been transposed. This is unnecessary and, in fact, makes the job
@@ -113,20 +120,17 @@ func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 		s0, s1 = s1, s0
 	}
 
-	fillRam(r, s0)
+	readData(r, s0, width, height)
 	mode := r.ReadBits(1)
 	if mode == 1 {
 		mode = 1 + r.ReadBits(1)
 	}
-	fillRam(r, s1)
+	readData(r, s1, width, height)
 
 	if r.Err() != nil {
 		//TODO better error handling
 		panic(r.Err())
 	}
-
-	copy(s0, deinterleave(s0, width, height))
-	copy(s1, deinterleave(s1, width, height))
 
 	switch mode {
 	case 0:
@@ -154,58 +158,57 @@ func Decompress(reader io.ByteReader) (b []uint8, w, h int) {
 	return b, width, height
 }
 
-func fillRam(r *bitReader, b []uint8) {
-	w := bitWriter{b: b[:0]}
-	if r.ReadBits(1) == 0 {
-		readRle(r, &w)
-	}
-	for w.Len() < len(b) {
-		px := r.ReadBits(2)
-		if px != 0 {
-			w.WriteBits(2, px)
-		} else {
-			readRle(r, &w)
+// ReadData reads, expands, and deinterleaves compressed pixel data.
+func readData(r *bitReader, b []uint8, width, height int) {
+	c := make(chan uint8)
+	go func() {
+		n := 0
+		z := uint16(0)
+		if r.ReadBits(1) == 0 {
+			z = readUint16(r)
 		}
-	}
-	if w.Len() > len(b) {
-		log.Panicf("read too much data: %v vs %v (w.n: %v) %v", w.Len(), len(b), w.n)
-	}
-}
+		for n < len(b)*4 {
+			if z > 0 {
+				c <- uint8(0)
+				z--
+				n++
+				continue
+			}
 
-func readRle(r *bitReader, w *bitWriter) {
-	c := uint(0)
-	for r.ReadBits(1) == 1 {
-		c += 1
-	}
+			px := r.ReadBits(2)
+			if px != 0 {
+				c <- px
+				n++
+			} else {
+				z = readUint16(r)
+			}
+		}
+		if n > len(b)*4 {
+			// TODO better error handling
+			log.Panicf("read too much data: %v vs %v", n, len(b)*4)
+		}
+	}()
 
-	n := uint(2<<c - 1)
-	n += uint(r.ReadBits16(c + 1))
-
-	for i := uint(0); i < n; i++ {
-		w.WriteBits(2, uint8(0))
-	}
-}
-
-func deinterleave(b []uint8, width, height int) []uint8 {
-	// The compressed image is not stored in tiles, and it is stored with
-	// its rows interleaved; two bits from the first row, two bits from
-	// the second row, and so on, in effect almost transposing the image.
-	// This seems pointless.
-	r := bitReader{r: bytes.NewReader(b)}
-	out := make([]uint8, len(b))
 	for x := 0; x < width; x++ {
 		for shift := uint(8); shift > 0; {
 			shift -= 2
 			for y := 0; y < height*8; y++ {
 				i := y*width + x
-				out[i] |= r.ReadBits(2) << shift
+				b[i] |= <-c << shift
 			}
 		}
 	}
-	if r.Err() != nil {
-		panic(r.Err())
+}
+
+// ReadUint16 reads a compressed 16-bit integer.
+func readUint16(r *bitReader) (n uint16) {
+	e := uint(1)
+	for r.ReadBits(1) == 1 {
+		e += 1
 	}
-	return out
+
+	n = uint16(uint(1)<<e - 1) + r.ReadBits16(e)
+	return n
 }
 
 var invXorShift [256]uint8
