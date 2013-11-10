@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -388,14 +389,19 @@ var gameboyPalette = color.Palette{
 }
 
 func main() {
-	f, err := os.Open("red.gb")
+	flag.Parse()
+	filename := flag.Arg(0)
+	if filename == "" {
+		filename = "red.gb"
+	}
+	f, err := os.Open(filename)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		return
 	}
 	z, err := newRipper(f)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		return
 	}
 	montage(z, os.Stdout)
