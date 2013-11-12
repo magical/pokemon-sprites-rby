@@ -404,6 +404,16 @@ func (z *ripper) SpritePalette(n int, scheme string) (color.Palette) {
 	return z.sgbPalettes[pi]
 }
 
+func (z *ripper) Palette() (p color.Palette) {
+	palettes := z.sgbPalettes[16:26]
+	p = append(p, palettes[0][0])
+	for _, sp := range palettes {
+		p = append(p, sp[1], sp[2])
+	}
+	p = append(p, palettes[0][3])
+	return
+}
+
 // GetBankRG returns the bank containg the graphics for pokemon n.
 func getBankRG(n int) int {
 	switch {
@@ -554,7 +564,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
-	montage(z, os.Stdout, grayPalette)
+	montage(z, os.Stdout, nil)
 	/*
 	m, err := z.Sprite(1)
 	if err != nil {
@@ -575,9 +585,10 @@ func montage(z *ripper, w io.Writer, pal color.Palette) {
 		//muteColors2(pal)
 		m = image.NewPaletted(b, pal)
 	} else {
-		m = image.NewNRGBA(b)
-		bg := image.NewUniform(z.SpritePalette(1, "sgb")[0])
-		draw.Draw(m, m.Bounds(), bg, image.ZP, draw.Src)
+		//m = image.NewNRGBA(b)
+		//bg := image.NewUniform(z.SpritePalette(1, "sgb")[0])
+		//draw.Draw(m, m.Bounds(), bg, image.ZP, draw.Src)
+		m = image.NewPaletted(b, z.Palette())
 	}
 	tile := image.Rect(0, 0, 56, 56)
 	for i := 0; i < 151; i++ {
@@ -598,7 +609,7 @@ func montage(z *ripper, w io.Writer, pal color.Palette) {
 		draw.Draw(m, tile.Add(image.Pt(col, row).Mul(56)), p, image.ZP, draw.Src)
 	}
 	sBIT := 5
-	if &pal[0] == &grayPalette[0] {
+	if pal != nil && &pal[0] == &grayPalette[0] {
 		sBIT = 2
 	}
 	png.EncodeWithSBIT(w, m, uint(sBIT))
