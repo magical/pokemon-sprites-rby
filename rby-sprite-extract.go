@@ -14,7 +14,8 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	"image/png"
+
+	"github.com/magical/png"
 )
 
 /*
@@ -502,6 +503,7 @@ func getValue(min, max int, v uint8) int {
 	return min + int(float32(max - min) * (2*u - u*u))
 }
 
+// http://sourceforge.net/p/vbam/code/1226/tree/trunk/src/gb/GB.cpp#l585
 func muteColors(p color.Palette) {
 	for i := range p {
 		c := p[i].(color.NRGBA)
@@ -524,6 +526,7 @@ func muteColors(p color.Palette) {
 	}
 }
 
+// https://code.google.com/p/gnuboy/source/browse/trunk/lcd.c?r=199#722
 func muteColors2(p color.Palette) {
 	for i := range p {
 		c := p[i].(color.NRGBA)
@@ -551,7 +554,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
-	montage(z, os.Stdout, gbPokemonRedPalette)
+	montage(z, os.Stdout, grayPalette)
 	/*
 	m, err := z.Sprite(1)
 	if err != nil {
@@ -568,8 +571,8 @@ func montage(z *ripper, w io.Writer, pal color.Palette) {
 	b := image.Rect(0, 0, 56*15, 56*((151+14)/15))
 	var m draw.Image
 	if pal != nil {
-		pal = append(color.Palette(nil), pal...)
-		muteColors2(pal)
+		//pal = append(color.Palette(nil), pal...)
+		//muteColors2(pal)
 		m = image.NewPaletted(b, pal)
 	} else {
 		m = image.NewNRGBA(b)
@@ -594,5 +597,9 @@ func montage(z *ripper, w io.Writer, pal color.Palette) {
 		col := i % 15
 		draw.Draw(m, tile.Add(image.Pt(col, row).Mul(56)), p, image.ZP, draw.Src)
 	}
-	png.Encode(w, m)
+	sBIT := 5
+	if &pal[0] == &grayPalette[0] {
+		sBIT = 2
+	}
+	png.EncodeWithSBIT(w, m, uint(sBIT))
 }
