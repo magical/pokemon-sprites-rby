@@ -248,6 +248,7 @@ var (
 
 type ripper struct {
 	f *os.File
+	lang string
 	version string
 	spritePos [151]struct{
 		front int64
@@ -290,6 +291,12 @@ func newRipper(f *os.File) (*ripper, error) {
 		z.version = "blue"
 	case "POKEMON YELLOW":
 		z.version = "yellow"
+	}
+
+	if isJP {
+		z.lang = "jp"
+	} else {
+		z.lang = "en"
 	}
 
 	// Read pokedex order
@@ -363,7 +370,8 @@ func newRipper(f *os.File) (*ripper, error) {
 	copy(z.spritePalette[:], paletteMap)
 
 	var palettes [40][4]colorRGB15
-	err = binary.Read(bytes.NewReader(rom[pos+152:]), binary.LittleEndian, &palettes)
+	r := bytes.NewReader(rom[pos+152:])
+	err = binary.Read(r, binary.LittleEndian, &palettes)
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +380,20 @@ func newRipper(f *os.File) (*ripper, error) {
 		for i, c := range p {
 			cp[i] = color.Color(c.NRGBA())
 		}
-		z.sgbPalettes = append(z.sgbPalettes, color.Palette(cp[:]))
+		z.sgbPalettes = append(z.sgbPalettes, cp[:])
+	}
+	if hasCGB {
+		err = binary.Read(r, binary.LittleEndian, &palettes)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range palettes {
+			var cp [4]color.Color
+			for i, c := range p {
+				cp[i] = color.Color(c.NRGBA())
+			}
+			z.cgbPalettes = append(z.cgbPalettes, cp[:])
+		}
 	}
 
 	return z, nil
@@ -399,13 +420,21 @@ func (z *ripper) Sprite(n int) (image.Image, error) {
 	return Decode(z.f)
 }
 
-func (z *ripper) SpritePalette(n int, scheme string) (color.Palette) {
+func (z *ripper) SpritePalette(n int, sys string) color.Palette {
 	pi := z.spritePalette[n-1]
-	return z.sgbPalettes[pi]
+	if sys == "sgb" {
+		return z.sgbPalettes[pi]
+	}
+	return z.cgbPalettes[pi]
 }
 
-func (z *ripper) Palette() (p color.Palette) {
-	palettes := z.sgbPalettes[16:26]
+func (z *ripper) CombinedPalette(sys string) (p color.Palette) {
+	var palettes []color.Palette
+	if sys == "sgb" {
+		palettes = z.sgbPalettes[16:26]
+	} else {
+		palettes = z.cgbPalettes[16:26]
+	}
 	p = append(p, palettes[0][0])
 	for _, sp := range palettes {
 		p = append(p, sp[1], sp[2])
@@ -548,47 +577,86 @@ func muteColors2(p color.Palette) {
 	}
 }
 
-func main() {
-	flag.Parse()
-	filename := flag.Arg(0)
-	if filename == "" {
-		filename = "red.gb"
+func muteColors3(p color.Palette) {
+	for i := range p {
+		c := p[i].(color.NRGBA)
+		r, g, b := uint16(c.R)>>3, uint16(c.G)>>3, uint16(c.B)>>3
+		rr := (r*13 + g*2 + b)/2
+		gg := (r*0 + g*12 + b*4)/2
+		bb := (r*3 + g*2 + b*11)/2
+		p[i] = color.NRGBA{uint8(rr), uint8(gg), uint8(bb), c.A}
 	}
-	f, err := os.Open(filename)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
-	}
-	z, err := newRipper(f)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
-	}
-	montage(z, os.Stdout, nil)
-	/*
-	m, err := z.Sprite(1)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	p := m.(*image.Paletted)
-	p.Palette = grayPalette
-	png.Encode(os.Stdout, m)
-	*/
 }
 
-func montage(z *ripper, w io.Writer, pal color.Palette) {
+func muteColors4(p color.Palette) {
+	for i := range p {
+		c := p[i].(color.NRGBA)
+		rr := c.R/2 + 82
+		gg := c.G/2 + 82
+		bb := c.B/2 + 82
+		p[i] = color.NRGBA{rr, gg, bb, c.A}
+	}
+}
+
+func main() {
+	flag.Parse()
+	for _, filename := range flag.Args() {
+		f, err := os.Open(filename)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		z, err := newRipper(f)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		path := "out"
+		os.MkdirAll(path, 0777)
+		var gbcPalette color.Palette
+		if z.cgbPalettes == nil {
+			switch z.version {
+			case "red":
+				gbcPalette = gbPokemonRedPalette
+			case "green":
+				gbcPalette = gbPokemonGreenPalette
+			case "blue":
+				gbcPalette = gbPokemonBluePalette
+			case "yellow":
+				gbcPalette = gbPokemonYellowPalette
+			}
+		}
+		var systems = []struct{
+			system      string
+			palette     color.Palette
+		}{
+			{"gb", grayPalette},
+			{"sgb", nil},
+			{"gbc", gbcPalette},
+		}
+		for _, sys := range systems {
+			dst, err := os.Create(path + "/" + z.lang + "-" + z.version + "-" + sys.system + ".png")
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				continue
+			}
+			montage(z, dst, sys.palette, sys.system)
+			dst.Close()
+		}
+		f.Close()
+	}
+}
+
+func montage(z *ripper, w io.Writer, pal color.Palette, sys string) {
 	b := image.Rect(0, 0, 56*15, 56*((151+14)/15))
 	var m draw.Image
 	if pal != nil {
-		//pal = append(color.Palette(nil), pal...)
-		//muteColors2(pal)
 		m = image.NewPaletted(b, pal)
 	} else {
 		//m = image.NewNRGBA(b)
 		//bg := image.NewUniform(z.SpritePalette(1, "sgb")[0])
 		//draw.Draw(m, m.Bounds(), bg, image.ZP, draw.Src)
-		m = image.NewPaletted(b, z.Palette())
+		m = image.NewPaletted(b, z.CombinedPalette(sys))
 	}
 	tile := image.Rect(0, 0, 56, 56)
 	for i := 0; i < 151; i++ {
@@ -600,7 +668,7 @@ func montage(z *ripper, w io.Writer, pal color.Palette) {
 		if pal != nil {
 			p.Palette = pal
 		} else {
-			p.Palette = z.SpritePalette(i+1, "sgb")
+			p.Palette = z.SpritePalette(i+1, sys)
 		}
 		padding := tile.Size().Sub(p.Rect.Size()).Div(2)
 		p.Rect = p.Rect.Add(padding)
@@ -608,6 +676,9 @@ func montage(z *ripper, w io.Writer, pal color.Palette) {
 		col := i % 15
 		draw.Draw(m, tile.Add(image.Pt(col, row).Mul(56)), p, image.ZP, draw.Src)
 	}
+	/*if p, ok := m.(*image.Paletted); ok {
+		muteColors2(p.Palette)
+	}*/
 	sBIT := 5
 	if pal != nil && &pal[0] == &grayPalette[0] {
 		sBIT = 2
