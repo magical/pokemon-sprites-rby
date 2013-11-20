@@ -246,6 +246,8 @@ var (
 	paletteMapBytes   = []byte{16, 22, 22, 22, 18, 18, 18, 19, 19, 19}
 )
 
+var fakeGbcPalettes []color.Palette
+
 type ripper struct {
 	f         *os.File
 	lang      string
@@ -425,6 +427,9 @@ func (z *ripper) SpritePalette(n int, sys string) color.Palette {
 	if sys == "sgb" {
 		return z.sgbPalettes[pi]
 	}
+	if sys == "fakegbc" && fakeGbcPalettes != nil {
+		return fakeGbcPalettes[pi]
+	}
 	return z.cgbPalettes[pi]
 }
 
@@ -432,6 +437,8 @@ func (z *ripper) CombinedPalette(sys string) (p color.Palette) {
 	var palettes []color.Palette
 	if sys == "sgb" {
 		palettes = z.sgbPalettes[16:26]
+	} else if sys == "fakegbc" && fakeGbcPalettes != nil {
+		palettes = fakeGbcPalettes[16:26]
 	} else {
 		palettes = z.cgbPalettes[16:26]
 	}
@@ -605,6 +612,21 @@ func main() {
 	for _, filename := range flag.Args() {
 		f, err := os.Open(filename)
 		if err != nil {
+			continue
+		}
+		z, err := newRipper(f)
+		if err != nil {
+			continue
+		}
+		if z.cgbPalettes != nil {
+			fakeGbcPalettes = z.cgbPalettes
+			break
+		}
+	}
+
+	for _, filename := range flag.Args() {
+		f, err := os.Open(filename)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
@@ -635,6 +657,7 @@ func main() {
 			{"gb", grayPalette},
 			{"sgb", nil},
 			{"gbc", gbcPalette},
+			{"fakegbc", nil},
 		}
 		for _, sys := range systems {
 			dst, err := os.Create(path + "/" + z.lang + "-" + z.version + "-" + sys.system + ".png")
