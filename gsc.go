@@ -10,8 +10,10 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"image/gif"
 	"image/png"
 	"io"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -43,17 +45,23 @@ var ErrTooLarge = errors.New("decompressed data is suspeciously large")
 
 // Decode a GSC image of dimensions w*8 x h*8.
 func Decode(reader io.Reader, w, h int) (*image.Paletted, error) {
-	data, err := decodeTiles(reader, w*h*16)
+	data, err := decodeTiles(newByteReader(reader), w*h*16)
 	if err != nil {
 		return nil, err
 	}
 	var m = image.NewPaletted(image.Rect(0, 0, w*8, h*8), nil)
-	untile(m, data, w, h)
+	untile(m, data)
 	return m, nil
 }
 
-func decodeTiles(reader io.Reader, sizehint int) ([]byte, error) {
-	var r = bufio.NewReader(reader)
+func newByteReader(r io.Reader) io.ByteReader {
+	if r, ok := r.(io.ByteReader); ok {
+		return r
+	}
+	return bufio.NewReader(r)
+}
+
+func decodeTiles(r io.ByteReader, sizehint int) ([]byte, error) {
 	var data = make([]byte, 0, sizehint)
 	var readErr error
 	readByte := func() (b byte) {
@@ -65,10 +73,10 @@ func decodeTiles(reader io.Reader, sizehint int) ([]byte, error) {
 	for {
 		var control, num, seek int
 		num = int(readByte())
-		if num == 0xff {
+		if num == 0xFF {
 			break
 		}
-		if len(data) > 0xffff {
+		if len(data) > 0xFFFF {
 			return nil, ErrTooLarge
 		}
 		if num>>5 == 7 {
@@ -104,8 +112,7 @@ func decodeTiles(reader io.Reader, sizehint int) ([]byte, error) {
 				data = append(data, b)
 			}
 		case 2:
-			var b [2]byte
-			r.Read(b[:])
+			b := [2]byte{readByte(), readByte()}
 			for i := 0; i < num; i++ {
 				data = append(data, b[i%2])
 			}
@@ -131,15 +138,19 @@ func decodeTiles(reader io.Reader, sizehint int) ([]byte, error) {
 		}
 		//fmt.Fprintf(os.Stderr, "%x\n", data)
 	}
+	if readErr == io.EOF {
+		readErr = io.ErrUnexpectedEOF
+	}
 	if readErr != nil {
 		return nil, readErr
 	}
 	return data, readErr
 }
 
-func untile(m *image.Paletted, data []byte, w, h int) {
-	for i, x := 0, 0; x < w*8; x += 8 {
-		for y := 0; y < h*8; y += 8 {
+func untile(m *image.Paletted, data []byte) {
+	w, h := m.Rect.Dx(), m.Rect.Dy()
+	for i, x := 0, 0; x < w; x += 8 {
+		for y := 0; y < h; y += 8 {
 			for ty := 0; ty < 8; ty++ {
 				pix := mingle(uint16(data[i]), uint16(data[i+1]))
 				for tx := 7; tx >= 0; tx-- {
@@ -183,7 +194,7 @@ func mingle(x, y uint16) uint16 {
 	return x | y<<1
 }
 
-var romtab = map[string]struct {
+type romInfo struct {
 	Title          string
 	StatsPos       int64
 	PalettePos     int64
@@ -198,7 +209,9 @@ var romtab = map[string]struct {
 	UnownExtraPos   int64
 	UnownFramesPos  int64
 	UnownBitmapsPos int64
-}{
+}
+
+var romtab = map[string]romInfo{
 	"POKEMON_GLD": {
 		Title:          "POKEMON_GLD",
 		StatsPos:       0x51B0B,
@@ -238,73 +251,33 @@ var defaultPalette = color.Palette{
 	color.Gray{0},
 }
 
-// BUG: This should really return an error
-func readFarPointer(r io.Reader) int64 {
-	var b [3]byte
-	_, err := r.Read(b[:])
-	if err != nil {
-		panic(err)
-	}
-	bank := int64(b[0])
-	return bank<<14 + int64(b[2])&0x3F<<8 + int64(b[1])
+type Ripper struct {
+	r    io.ReaderAt
+	info romInfo
 }
 
-func readNearPointer(r io.Reader, bank int64) int64 {
-	var b [2]byte
-	_, err := r.Read(b[:])
-	if err != nil {
-		panic(err)
-	}
-	p := bank<<14 + int64(b[1])&0x3F<<8 + int64(b[0])
-	//fmt.Fprintf(os.Stderr, "Read pointer %#x (%+x)\n", p, b)
-	return p
-}
-
-// Seek to a position designated by a pointer in an array at base.
-func seekIndirect(r io.ReadSeeker, base int64, n int) {
-	p := base + int64(n)*2
-	//fmt.Fprintf(os.Stderr, "Seeking to %x+%d*2 = %x\n", base, n, p)
-	r.Seek(p, 0)
-	p = readNearPointer(r, base>>14)
-	r.Seek(p, 0)
-}
-
-func main() {
-	flag.Parse()
-
-	game, err := os.Open(flag.Arg(0))
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer game.Close()
-	number, _ := strconv.Atoi(flag.Arg(1))
-	form := flag.Arg(2)
+func NewRipper(r io.ReaderAt) (_ *Ripper, err error) {
+	rip := new(Ripper)
+	rip.r = r
 
 	var header [0x150]byte
-	game.Read(header[:])
+	r.ReadAt(header[:], 0)
 	title := string(header[0x134:0x13F])
 	title = strings.TrimRight(title, "\x00")
 
 	info, ok := romtab[title]
 	if !ok {
-		fmt.Println("Couldn't recognize ROM")
-		return
+		return nil, errors.New("Couldn't recognize ROM")
 	}
+	rip.info = info
 
-	if number > 250 {
-		fmt.Println("Pokemon number out of range")
-		return
-	}
+	return rip, nil
+}
 
-	// Check that the file is seekable. After this we will assume that all
-	// seeks succeed.
-	if _, err := game.Seek(0, 0); err != nil {
-		fmt.Println(err)
-	}
-
-	// Base stats structure. We only care about SpriteSize, but what the heck.
-	var stats [251]struct {
+func (rip *Ripper) pokemonSize(number int) (width, height int) {
+	// Read the base stats structure. We only care about SpriteSize, but
+	// what the heck.
+	var stats struct {
 		N          uint8
 		Stats      [6]uint8
 		Types      [2]uint8
@@ -321,184 +294,327 @@ func main() {
 		EggGroups  uint8
 		TMs        [8]uint8
 	}
-	game.Seek(info.StatsPos, 0)
-	err = binary.Read(game, binary.LittleEndian, stats[:])
+	size := int64(binary.Size(&stats))
+	off := rip.info.StatsPos + size*int64(number-1)
+	err := binary.Read(
+		io.NewSectionReader(rip.r, off, size),
+		binary.LittleEndian,
+		&stats,
+	)
 	if err != nil {
-		fmt.Println(err)
-		return
+		// BUG: shouldn't panic
+		panic(err)
 	}
+
 	// The high and low nibbles of SpriteSize give the width and height of
 	// the sprite in 8x8 tiles. Not sure which is which, but it doesn't
 	// matter because they always match.
-	wh := int(stats[number].SpriteSize) >> 4
+	width = int(stats.SpriteSize >> 4 & 0xF)
+	height = int(stats.SpriteSize >> 0 & 0xF)
 
+	return
+}
+
+func (rip *Ripper) pokemonPalette(number int) color.Palette {
 	var palettes [252][4]colorRGB15
-	game.Seek(info.PalettePos+8, 0)
-	err = binary.Read(game, binary.LittleEndian, &palettes)
+	r := io.NewSectionReader(rip.r, rip.info.PalettePos, int64(binary.Size(&palettes)))
+	err := binary.Read(r, binary.LittleEndian, &palettes)
+	if err != nil {
+		// BUG: shouldn't panic
+		panic(err)
+	}
+	pal := color.Palette{
+		color.White,
+		palettes[number][0],
+		palettes[number][1],
+		color.Black,
+	}
+	return pal
+}
+
+// NewSectionReader returns an io.SectionReader that stops at the next bank boundary.
+func newSectionReader(r io.ReaderAt, off int64) *io.SectionReader {
+	return io.NewSectionReader(r, off, off&^0x3FFF+0x4000)
+}
+
+func (rip *Ripper) Pokemon(number int) (m *image.Paletted, err error) {
+	if 1 > number || number > 251 {
+		return nil, errors.New("Pokémon number out of range")
+	}
+	w, h := rip.pokemonSize(number)
+	off := rip.pokemonOffset(number)
+	pal := rip.pokemonPalette(number)
+	log.Printf("Ripping sprite %d, size %dx%d, offset %x", number, w, h, off)
+	r := newSectionReader(rip.r, off)
+	m, err = Decode(r, w, h)
+	if m != nil {
+		m.Palette = pal
+	}
+	return
+}
+
+func (rip *Ripper) PokemonAnimation(number int) (g *gif.GIF, err error) {
+	if 1 > number || number > 251 {
+		return nil, errors.New("Pokémon number out of range")
+	}
+
+	frames, err := rip.pokemonFrames(number)
+	if err != nil {
+		return nil, err
+	}
+
+	off := readNearPointerAt(rip.r, rip.info.AnimPos, number-1)
+	animdata, err := bufio.NewReader(newSectionReader(rip.r, off)).ReadBytes('\xFF')
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("% x", animdata)
+
+	g = new(gif.GIF)
+
+	var loop, clock int
+loop:
+	for pc := 0; ; pc += 2 {
+		//log.Println("PC", pc)
+		switch animdata[pc] {
+		case 0xFF:
+			break loop
+		case 0xFE:
+			loop = int(animdata[pc+1])
+		case 0xFD:
+			if loop > 0 {
+				pc = int(animdata[pc+1]) * 2
+				pc -= 2
+				loop--
+			}
+		default:
+			delay := int(animdata[pc+1])
+			g.Image = append(g.Image, frames[animdata[pc]])
+			//g.Delay = append(g.Delay, delay*100/60)
+			g.Delay = append(g.Delay, (clock+delay)*100/60 - clock*100/60)
+			clock += delay
+		}
+	}
+	g.Image = append(g.Image, frames[0])
+	g.Delay = append(g.Delay, clock*2*100/60 - clock)
+
+	return g, nil
+}
+
+func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
+	// TODO: Kinda want to just slurp in all the animation data for
+	// every sprite at once. It's all in just a couple banks.
+
+	w, h := rip.pokemonSize(number)
+	palette := rip.pokemonPalette(number)
+
+	s := rip.r.(io.Seeker)
+	size, err := s.Seek(0, 2)
+	if err != nil {
+		return nil, err
+	}
+
+	r := io.NewSectionReader(rip.r, 0, size)
+
+	r.Seek(rip.pokemonOffset(number), 0)
+	tiledata, err := decodeTiles(bufio.NewReader(r), w*h*16)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Seek(readNearPointerAt(r, rip.info.AnimPos, number-1), 0)
+	animdata, err := bufio.NewReader(r).ReadBytes('\xFF')
+	if err != nil {
+		return nil, err
+	}
+	//fmt.Fprintf(os.Stderr, "%x\n", animdata)
+
+	r.Seek(readNearPointerAt(r, rip.info.ExtraPos, number-1), 0)
+	extradata, err := bufio.NewReader(r).ReadBytes('\xFF')
+	if err != nil {
+		return nil, err
+	}
+
+	// Find the number of frames by picking the highest frame in the anim data.
+	var nframes int
+	for i := 0; i < len(animdata); i += 2 {
+		if animdata[i] < 0x80 && nframes < int(animdata[i]) {
+			nframes = int(animdata[i])
+		}
+	}
+	for i := 0; i < len(extradata); i += 2 {
+		if extradata[i] < 0x80 && nframes < int(extradata[i]) {
+			nframes = int(extradata[i])
+		}
+	}
+	//fmt.Fprintf(os.Stderr, "%d frames\n", nframes)
+
+	bitmaplen := (w*h + 7) / 8 // 1 pixel per tile
+	bitmapdata := make([]byte, bitmaplen*nframes)
+	off := readNearPointerAt(r, rip.info.BitmapsPos, number-1)
+	_, err = r.ReadAt(bitmapdata, off)
+	if err != nil {
+		return nil, err
+	}
+
+	var frames = make([]*image.Paletted, nframes+1)
+	var data = make([]uint8, w*h*16)
+	var m = image.NewPaletted(image.Rect(0, 0, w*8, h*8), palette)
+	untile(m, tiledata)
+	frames[0] = m
+
+	off = readNearPointerAt(r, rip.info.FramesPos, number-1)
+	if number > 151 {
+		off += 0x4000
+	}
+
+	fr := bufio.NewReader(nil)
+	for i := 0; i < nframes; i++ {
+		r.Seek(readNearPointerAt(r, off, i), 0)
+		fr.Reset(r)
+		bn, _ := fr.ReadByte()
+		//fmt.Fprintf(os.Stderr, "bitmap %d\n", bn)
+		if int(bn) > nframes {
+			return nil, ErrMalformed
+		}
+		bitindex := uint(bn) * uint(bitmaplen) * 8
+		for di := 0; di < len(data); di += 16 {
+			bit := bitmapdata[bitindex/8] >> (bitindex % 8) & 1
+			bitindex++
+			si := di
+			if bit != 0 {
+				b, _ := fr.ReadByte()
+				si = int(b) * 16
+			}
+			if si+16 > len(tiledata) {
+				return nil, ErrMalformed
+			}
+			copy(data[di:di+16], tiledata[si:si+16])
+		}
+		m = image.NewPaletted(m.Rect, m.Palette)
+		untile(m, data)
+		frames[i+1] = m
+	}
+	return frames, nil
+}
+
+func (rip *Ripper) pokemonOffset(number int) (off int64) {
+	var n int
+	if number == 201 {
+		off = rip.info.UnownSpritePos
+		/*if form != "" && 'a' <= form[0] && form[0] <= 'z' {
+			n = 2 * (form[0] - 'a')
+		}*/
+	} else {
+		off = rip.info.SpritePos
+		n = 2 * (number - 1)
+	}
+	off = readFarPointerAt(rip.r, off, n)
+	if rip.info.Title == "PM_CRYSTAL" {
+		off += 0x36 << 14
+	} else {
+		switch off >> 14 {
+		case 0x13, 0x14:
+			off += 0xC << 14
+		case 0x1F:
+			off += (0x2E - 0x1F) << 14
+		}
+	}
+
+	return off
+}
+
+func readFarPointerAt(r io.ReaderAt, off int64, n int) int64 {
+	var b [3]byte
+	off += int64(len(b)) * int64(n)
+	_, err := r.ReadAt(b[:], off)
+	if err != nil {
+		// BUG: shouldn't panic
+		panic(err)
+	}
+	bank := int64(b[0])
+	return bank<<14 + int64(b[2])&0x3F<<8 + int64(b[1])
+}
+
+func readNearPointerAt(r io.ReaderAt, off int64, n int) int64 {
+	var b [2]byte
+	off += int64(len(b)) * int64(n)
+	_, err := r.ReadAt(b[:], off)
+	if err != nil {
+		// BUG: shouldn't panic
+		panic(err)
+	}
+	p := off&^0x3FFF + int64(b[1])&0x3F<<8 + int64(b[0])
+	return p
+}
+
+func main() {
+	flag.Parse()
+
+	game, err := os.Open(flag.Arg(0))
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+	defer game.Close()
+	number, _ := strconv.Atoi(flag.Arg(1))
+	//form := flag.Arg(2)
 
-	palette := color.Palette{
-		color.Gray{0xFF},
-		palettes[number][0],
-		palettes[number][1],
-		color.Gray{0},
+	rip, err := NewRipper(game)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return
 	}
+	var (
+		//r = rip.r
+		info    = rip.info
+		w, h    = rip.pokemonSize(number)
+		palette = rip.pokemonPalette(number)
+	)
 
-	if number == 200 {
-		game.Seek(info.UnownSpritePos, 0)
-		if form != "" && 'a' <= form[0] && form[0] <= 'z' {
-			game.Seek(int64(form[0]-'a')*6, 1)
-		}
-	} else {
-		game.Seek(info.SpritePos+6*int64(number), 0)
-	}
-	spritePos := readFarPointer(game)
-	if title == "PM_CRYSTAL" {
-		spritePos += 0x36 << 14
-	} else {
-		switch spritePos >> 14 {
-		case 0x13, 0x14:
-			spritePos += 0xC << 14
-		case 0x1F:
-			spritePos += (0x2E - 0x1F) << 14
-		}
+	// Check that the file is seekable. After this we will assume that all
+	// seeks succeed.
+	if _, err := game.Seek(0, 0); err != nil {
+		fmt.Println(err)
 	}
 
 	if info.AnimPos != 0 {
-		game.Seek(spritePos, 0)
-		tiledata, err := decodeTiles(game, wh*wh*16)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		var tiles []*image.Paletted
-		for i := 0; i < len(tiledata); i += 16 {
-			m := image.NewPaletted(image.Rect(0, 0, 8, 8), palette)
-			untile(m, tiledata[i:i+16], 1, 1) // seems like overkill
-			tiles = append(tiles, m)
-		}
-
-		// TODO: Kinda want to just slurp in all the animation data for
-		// every sprite at once. It's stored in just a couple banks.
-
-		seekIndirect(game, info.AnimPos, number)
-		animdata, err := bufio.NewReader(game).ReadBytes('\xFF')
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		//fmt.Fprintf(os.Stderr, "%x\n", animdata)
-
-		seekIndirect(game, info.ExtraPos, number)
-		extradata, err := bufio.NewReader(game).ReadBytes('\xFF')
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		// Find the number of frames by picking the highest frame in the anim data.
-		var nframes int
-		for i := 0; i < len(animdata); i += 2 {
-			if animdata[i] < 0x80 && nframes < int(animdata[i]) {
-				nframes = int(animdata[i])
+		for n := 1; n <= 251; n++ {
+			g, err := rip.PokemonAnimation(n)
+			if err != nil {
+				fmt.Println(err)
+				continue
 			}
-		}
-		for i := 0; i < len(extradata); i += 2 {
-			if extradata[i] < 0x80 && nframes < int(extradata[i]) {
-				nframes = int(extradata[i])
-			}
-		}
-		//fmt.Fprintf(os.Stderr, "%d frames\n", nframes)
 
-		seekIndirect(game, info.BitmapsPos, number)
-		bitmaplen := (wh*wh + 7) / 8 // 1 pixel per tile
-		bitmapdata := make([]byte, bitmaplen*nframes)
-		_, err = game.Read(bitmapdata)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		var frameptrs []int64
-		game.Seek(info.FramesPos+int64(number)*2, 0)
-		bank := info.FramesPos >> 14
-		if number > 150 {
-			bank++
-		}
-		game.Seek(readNearPointer(game, bank), 0)
-		//seekIndirect(game, info.FramesPos, number)
-		for i := 0; i < nframes; i++ {
-			frameptrs = append(frameptrs, readNearPointer(game, bank))
-		}
-		var frames []*image.Paletted
-		rect := image.Rect(0, 0, wh*8, wh*8)
-		m := image.NewPaletted(rect, palette)
-		untile(m, tiledata, wh, wh)
-		frames = append(frames, m)
-		for i := 0; i < nframes; i++ {
-			m = image.NewPaletted(rect, palette)
-			game.Seek(frameptrs[i], 0)
-			fr := bufio.NewReader(game)
-			bn, _ := fr.ReadByte()
-			//fmt.Fprintf(os.Stderr, "bitmap %d\n", bn)
-			bitindex := uint(bn) * uint(bitmaplen) * 8
-			ti := 0
-			for x := 0; x < wh; x++ {
-				for y := 0; y < wh; y++ {
-					tile := tiles[ti]
-					ti++
-					bit := bitmapdata[bitindex/8] >> (bitindex % 8) & 1
-					bitindex++
-					if bit != 0 {
-						a, _ := fr.ReadByte()
-						tile = tiles[a]
-					}
-					draw.Draw(m, tile.Rect.Add(image.Pt(x*8, y*8)), tile, image.ZP, draw.Src)
-				}
+			f, err := os.Create(fmt.Sprintf("gscanim/%d.gif", n))
+			if err != nil {
+				fmt.Println(err)
+				continue
 			}
-			frames = append(frames, m)
+			gif.EncodeAll(f, g)
+			f.Close()
 		}
-		nframes++
-		m = image.NewPaletted(image.Rect(0, 0, wh*8*nframes, wh*8), palette)
-		for i := 0; i < nframes; i++ {
-			r := frames[i].Rect.Add(image.Pt(wh*8*i, 0))
-			draw.Draw(m, r, frames[i], image.ZP, draw.Src)
-		}
-		png.Encode(os.Stdout, m)
-	} else {
-		game.Seek(spritePos, 0)
-		m, err := Decode(game, wh, wh)
+		return
+
+		frames, err := rip.pokemonFrames(number)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		m.Palette = palette
-		png.Encode(os.Stdout, m)
-	}
-}
 
-func decodeAnim(animdata []byte, frames []*image.Paletted, w, h int) {
-	var anim []*image.Paletted
-	var loopcount int
-	for pc := 0; ; pc += 2 {
-		switch animdata[pc] {
-		case 0xFF:
-			break
-		case 0xFE:
-			loopcount = int(animdata[pc])
-		case 0xFD:
-			if loopcount > 0 {
-				pc = int(animdata[pc]) * 2
-			}
-		default:
-			framenum, duration := animdata[pc], int(animdata[pc+1])
-			anim = append(anim, frames[framenum])
-			for i := 1; i < duration; i++ {
-				anim = append(anim, frames[framenum])
-			}
+		m := image.NewPaletted(image.Rect(0, 0, w*8*len(frames), h*8), palette)
+		for i := 0; i < len(frames); i++ {
+			r := frames[i].Rect.Add(image.Pt(w*8*i, 0))
+			draw.Draw(m, r, frames[i], image.ZP, draw.Src)
 		}
+		png.Encode(os.Stdout, m)
+	} else {
+		m, err := rip.Pokemon(number)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		png.Encode(os.Stdout, m)
 	}
 }
