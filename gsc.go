@@ -1,21 +1,15 @@
 /* Pokemon Gold/Silver/Crystal sprite ripper. */
-package main
+package sprites
 
 import (
 	"bufio"
 	"encoding/binary"
 	"errors"
-	"flag"
-	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"image/gif"
-	"image/png"
 	"io"
-	"log"
-	"os"
-	"strconv"
+	//"log"
 	"strings"
 )
 
@@ -45,7 +39,7 @@ var ErrTooLarge = errors.New("decompressed data is suspeciously large")
 
 // Decode a GSC image of dimensions w*8 x h*8.
 func Decode(reader io.Reader, w, h int) (*image.Paletted, error) {
-	data, err := decodeTiles(newByteReader(reader), w*h*16)
+	data, err := decodeTiles(newByteReader(reader), w*h*16*2)
 	if err != nil {
 		return nil, err
 	}
@@ -154,28 +148,14 @@ func untile(m *image.Paletted, data []byte) {
 			for ty := 0; ty < 8; ty++ {
 				pix := mingle(uint16(data[i]), uint16(data[i+1]))
 				for tx := 7; tx >= 0; tx-- {
-					m.SetColorIndex(x+tx, y+ty, uint8(pix&3))
+					i := m.PixOffset(x+tx, y+ty)
+					m.Pix[i] = uint8(pix & 3)
 					pix >>= 2
 				}
 				i += 2
 			}
 		}
 	}
-}
-
-type colorRGB15 uint16
-
-func (rgb colorRGB15) NRGBA() color.NRGBA {
-	return color.NRGBA{
-		uint8(((rgb>>0&31)*255 + 15) / 31),
-		uint8(((rgb>>5&31)*255 + 15) / 31),
-		uint8(((rgb>>10&31)*255 + 15) / 31),
-		255,
-	}
-}
-
-func (rgb colorRGB15) RGBA() (r, g, b, a uint32) {
-	return rgb.NRGBA().RGBA()
 }
 
 func reverseBits(b byte) byte {
@@ -251,14 +231,28 @@ var defaultPalette = color.Palette{
 	color.Gray{0},
 }
 
+type Reader interface {
+	io.Reader
+	io.ReaderAt
+	io.Seeker
+}
+
 type Ripper struct {
-	r    io.ReaderAt
+	r    Reader
+	buf  *bufferedReader
 	info romInfo
 }
 
-func NewRipper(r io.ReaderAt) (_ *Ripper, err error) {
+func NewRipper(r Reader) (_ *Ripper, err error) {
 	rip := new(Ripper)
 	rip.r = r
+	rip.buf = newBufferedReader(r)
+
+	// Check that the reader is seekable. After this we will assume that all
+	// seeks succeed.
+	if _, err := r.Seek(0, 0); err != nil {
+		return nil, err
+	}
 
 	var header [0x150]byte
 	r.ReadAt(header[:], 0)
@@ -272,6 +266,22 @@ func NewRipper(r io.ReaderAt) (_ *Ripper, err error) {
 	rip.info = info
 
 	return rip, nil
+}
+
+// BufferedReader is a *bufio.Reader that can Seek.
+type bufferedReader struct {
+	r io.ReadSeeker
+	*bufio.Reader
+}
+
+func newBufferedReader(r io.ReadSeeker) *bufferedReader {
+	return &bufferedReader{r, bufio.NewReader(r)}
+}
+
+// Seek sets the position of the underlying reader and resets the buffer.
+func (b *bufferedReader) Seek(off int64, whence int) {
+	b.r.Seek(off, whence)
+	b.Reset(b.r)
 }
 
 func (rip *Ripper) pokemonSize(number int) (width, height int) {
@@ -316,8 +326,9 @@ func (rip *Ripper) pokemonSize(number int) (width, height int) {
 }
 
 func (rip *Ripper) pokemonPalette(number int) color.Palette {
-	var palettes [252][4]colorRGB15
-	r := io.NewSectionReader(rip.r, rip.info.PalettePos, int64(binary.Size(&palettes)))
+	var palettes [4]RGB15
+	off := rip.info.PalettePos + int64(binary.Size(&palettes))*int64(number)
+	r := io.NewSectionReader(rip.r, off, int64(binary.Size(&palettes)))
 	err := binary.Read(r, binary.LittleEndian, &palettes)
 	if err != nil {
 		// BUG: shouldn't panic
@@ -325,16 +336,21 @@ func (rip *Ripper) pokemonPalette(number int) color.Palette {
 	}
 	pal := color.Palette{
 		color.White,
-		palettes[number][0],
-		palettes[number][1],
+		palettes[0],
+		palettes[1],
 		color.Black,
 	}
 	return pal
 }
 
-// NewSectionReader returns an io.SectionReader that stops at the next bank boundary.
-func newSectionReader(r io.ReaderAt, off int64) *io.SectionReader {
-	return io.NewSectionReader(r, off, off&^0x3FFF+0x4000)
+type RGB15 uint16
+
+func (rgb RGB15) RGBA() (r, g, b, a uint32) {
+	r = (uint32(rgb>>0&31)*0xFFFF + 15) / 31
+	g = (uint32(rgb>>5&31)*0xFFFF + 15) / 31
+	b = (uint32(rgb>>10&31)*0xFFFF + 15) / 31
+	a = 0xFFFF
+	return
 }
 
 func (rip *Ripper) Pokemon(number int) (m *image.Paletted, err error) {
@@ -344,13 +360,17 @@ func (rip *Ripper) Pokemon(number int) (m *image.Paletted, err error) {
 	w, h := rip.pokemonSize(number)
 	off := rip.pokemonOffset(number)
 	pal := rip.pokemonPalette(number)
-	log.Printf("Ripping sprite %d, size %dx%d, offset %x", number, w, h, off)
-	r := newSectionReader(rip.r, off)
-	m, err = Decode(r, w, h)
+	//log.Printf("Ripping sprite %d, size %dx%d, offset %x", number, w, h, off)
+	rip.buf.Seek(off, 0)
+	m, err = Decode(rip.buf, w, h)
 	if m != nil {
 		m.Palette = pal
 	}
 	return
+}
+
+func (rip *Ripper) HasAnimations() bool {
+	return rip.info.AnimPos != 0
 }
 
 func (rip *Ripper) PokemonAnimation(number int) (g *gif.GIF, err error) {
@@ -363,13 +383,13 @@ func (rip *Ripper) PokemonAnimation(number int) (g *gif.GIF, err error) {
 		return nil, err
 	}
 
-	off := readNearPointerAt(rip.r, rip.info.AnimPos, number-1)
-	animdata, err := bufio.NewReader(newSectionReader(rip.r, off)).ReadBytes('\xFF')
+	rip.buf.Seek(readNearPointerAt(rip.r, rip.info.AnimPos, number-1), 0)
+	animdata, err := rip.buf.ReadBytes('\xFF')
 	if err != nil {
 		return nil, err
 	}
 
-	log.Printf("% x", animdata)
+	//log.Printf("% x", animdata)
 
 	g = new(gif.GIF)
 
@@ -392,46 +412,46 @@ loop:
 			delay := int(animdata[pc+1])
 			g.Image = append(g.Image, frames[animdata[pc]])
 			//g.Delay = append(g.Delay, delay*100/60)
-			g.Delay = append(g.Delay, (clock+delay)*100/60 - clock*100/60)
+			g.Delay = append(g.Delay, (clock+delay)*100/60-clock*100/60)
 			clock += delay
 		}
 	}
 	g.Image = append(g.Image, frames[0])
-	g.Delay = append(g.Delay, clock*2*100/60 - clock)
+	g.Delay = append(g.Delay, clock*2*100/60-clock)
 
 	return g, nil
 }
 
+func (rip *Ripper) PokemonFrames(number int) ([]*image.Paletted, error) {
+	if 1 > number || number > 251 {
+		return nil, errors.New("Pokémon number out of range")
+	}
+	return rip.pokemonFrames(number)
+}
 func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
 	// TODO: Kinda want to just slurp in all the animation data for
 	// every sprite at once. It's all in just a couple banks.
+	// OTOH, profiling shows that this isn't a bottleneck.
 
 	w, h := rip.pokemonSize(number)
 	palette := rip.pokemonPalette(number)
+	buf := rip.buf
 
-	s := rip.r.(io.Seeker)
-	size, err := s.Seek(0, 2)
+	buf.Seek(rip.pokemonOffset(number), 0)
+	tiledata, err := decodeTiles(buf, w*h*16*2)
 	if err != nil {
 		return nil, err
 	}
 
-	r := io.NewSectionReader(rip.r, 0, size)
-
-	r.Seek(rip.pokemonOffset(number), 0)
-	tiledata, err := decodeTiles(bufio.NewReader(r), w*h*16)
-	if err != nil {
-		return nil, err
-	}
-
-	r.Seek(readNearPointerAt(r, rip.info.AnimPos, number-1), 0)
-	animdata, err := bufio.NewReader(r).ReadBytes('\xFF')
+	buf.Seek(readNearPointerAt(rip.r, rip.info.AnimPos, number-1), 0)
+	animdata, err := buf.ReadBytes('\xFF')
 	if err != nil {
 		return nil, err
 	}
 	//fmt.Fprintf(os.Stderr, "%x\n", animdata)
 
-	r.Seek(readNearPointerAt(r, rip.info.ExtraPos, number-1), 0)
-	extradata, err := bufio.NewReader(r).ReadBytes('\xFF')
+	buf.Seek(readNearPointerAt(rip.r, rip.info.ExtraPos, number-1), 0)
+	extradata, err := buf.ReadBytes('\xFF')
 	if err != nil {
 		return nil, err
 	}
@@ -452,8 +472,8 @@ func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
 
 	bitmaplen := (w*h + 7) / 8 // 1 pixel per tile
 	bitmapdata := make([]byte, bitmaplen*nframes)
-	off := readNearPointerAt(r, rip.info.BitmapsPos, number-1)
-	_, err = r.ReadAt(bitmapdata, off)
+	off := readNearPointerAt(rip.r, rip.info.BitmapsPos, number-1)
+	_, err = rip.r.ReadAt(bitmapdata, off)
 	if err != nil {
 		return nil, err
 	}
@@ -464,16 +484,14 @@ func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
 	untile(m, tiledata)
 	frames[0] = m
 
-	off = readNearPointerAt(r, rip.info.FramesPos, number-1)
+	off = readNearPointerAt(rip.r, rip.info.FramesPos, number-1)
 	if number > 151 {
 		off += 0x4000
 	}
 
-	fr := bufio.NewReader(nil)
 	for i := 0; i < nframes; i++ {
-		r.Seek(readNearPointerAt(r, off, i), 0)
-		fr.Reset(r)
-		bn, _ := fr.ReadByte()
+		buf.Seek(readNearPointerAt(rip.r, off, i), 0)
+		bn, _ := buf.ReadByte()
 		//fmt.Fprintf(os.Stderr, "bitmap %d\n", bn)
 		if int(bn) > nframes {
 			return nil, ErrMalformed
@@ -484,7 +502,7 @@ func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
 			bitindex++
 			si := di
 			if bit != 0 {
-				b, _ := fr.ReadByte()
+				b, _ := buf.ReadByte()
 				si = int(b) * 16
 			}
 			if si+16 > len(tiledata) {
@@ -547,74 +565,4 @@ func readNearPointerAt(r io.ReaderAt, off int64, n int) int64 {
 	}
 	p := off&^0x3FFF + int64(b[1])&0x3F<<8 + int64(b[0])
 	return p
-}
-
-func main() {
-	flag.Parse()
-
-	game, err := os.Open(flag.Arg(0))
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer game.Close()
-	number, _ := strconv.Atoi(flag.Arg(1))
-	//form := flag.Arg(2)
-
-	rip, err := NewRipper(game)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return
-	}
-	var (
-		//r = rip.r
-		info    = rip.info
-		w, h    = rip.pokemonSize(number)
-		palette = rip.pokemonPalette(number)
-	)
-
-	// Check that the file is seekable. After this we will assume that all
-	// seeks succeed.
-	if _, err := game.Seek(0, 0); err != nil {
-		fmt.Println(err)
-	}
-
-	if info.AnimPos != 0 {
-		for n := 1; n <= 251; n++ {
-			g, err := rip.PokemonAnimation(n)
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-
-			f, err := os.Create(fmt.Sprintf("gscanim/%d.gif", n))
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-			gif.EncodeAll(f, g)
-			f.Close()
-		}
-		return
-
-		frames, err := rip.pokemonFrames(number)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-
-		m := image.NewPaletted(image.Rect(0, 0, w*8*len(frames), h*8), palette)
-		for i := 0; i < len(frames); i++ {
-			r := frames[i].Rect.Add(image.Pt(w*8*i, 0))
-			draw.Draw(m, r, frames[i], image.ZP, draw.Src)
-		}
-		png.Encode(os.Stdout, m)
-	} else {
-		m, err := rip.Pokemon(number)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		png.Encode(os.Stdout, m)
-	}
 }
