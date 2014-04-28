@@ -34,8 +34,15 @@ import (
 
 */
 
-var ErrMalformed = errors.New("malformed data")
-var ErrTooLarge = errors.New("decompressed data is suspeciously large")
+const MaxPokemon = 251
+
+var (
+	ErrMalformed     = errors.New("malformed data")
+	ErrTooLarge      = errors.New("decompressed data is suspeciously large")
+	ErrNoSuchPokemon = errors.New("Pokémon number out of range")
+)
+
+var UnownForms = []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"}
 
 // Decode a GSC image of dimensions w*8 x h*8.
 func Decode(reader io.Reader, w, h int) (*image.Paletted, error) {
@@ -175,52 +182,57 @@ func mingle(x, y uint16) uint16 {
 }
 
 type romInfo struct {
-	Title          string
-	StatsPos       int64
-	PalettePos     int64
-	SpritePos      int64
-	UnownSpritePos int64
+	Title             string
+	Version           string
+	StatsOffset       int64
+	PaletteOffset     int64
+	SpriteOffset      int64
+	UnownSpriteOffset int64
 
-	AnimPos         int64
-	ExtraPos        int64
-	FramesPos       int64
-	BitmapsPos      int64
-	UnownAnimPos    int64
-	UnownExtraPos   int64
-	UnownFramesPos  int64
-	UnownBitmapsPos int64
+	AnimOffset         int64
+	ExtraOffset        int64
+	FramesOffset       int64
+	BitmapsOffset      int64
+	UnownAnimOffset    int64
+	UnownExtraOffset   int64
+	UnownFramesOffset  int64
+	UnownBitmapsOffset int64
 }
 
 var romtab = map[string]romInfo{
 	"POKEMON_GLD": {
-		Title:          "POKEMON_GLD",
-		StatsPos:       0x51B0B,
-		PalettePos:     0xAD3D,
-		SpritePos:      0x48000,
-		UnownSpritePos: 0x7C000,
+		Title:             "POKEMON_GLD",
+		Version:           "gold",
+		StatsOffset:       0x51B0B,
+		PaletteOffset:     0xAD3D,
+		SpriteOffset:      0x48000,
+		UnownSpriteOffset: 0x7C000,
 	},
 	"POKEMON_SLV": {
 		// Same as Gold
-		Title:          "POKEMON_SLV",
-		StatsPos:       0x51B0B,
-		PalettePos:     0xAD3D,
-		SpritePos:      0x48000,
-		UnownSpritePos: 0x7C000,
+		Title:             "POKEMON_SLV",
+		Version:           "silver",
+		StatsOffset:       0x51B0B,
+		PaletteOffset:     0xAD3D,
+		SpriteOffset:      0x48000,
+		UnownSpriteOffset: 0x7C000,
 	},
 	"PM_CRYSTAL": {
-		Title:           "PM_CRYSTAL",
-		StatsPos:        0x51424,
-		PalettePos:      0xA8CE,
-		SpritePos:       0x120000,
-		UnownSpritePos:  0x124000,
-		AnimPos:         0xD0695,
-		ExtraPos:        0xD16A3,
-		UnownAnimPos:    0xD2229,
-		UnownExtraPos:   0xD23D1,
-		BitmapsPos:      0xD24EF,
-		UnownBitmapsPos: 0xD3ADE,
-		FramesPos:       0xD4000,
-		UnownFramesPos:  0xD99A9,
+		Title:             "PM_CRYSTAL",
+		Version:           "crystal",
+		StatsOffset:       0x51424,
+		PaletteOffset:     0xA8CE,
+		SpriteOffset:      0x120000,
+		UnownSpriteOffset: 0x124000,
+
+		AnimOffset:         0xD0695,
+		ExtraOffset:        0xD16A3,
+		UnownAnimOffset:    0xD2229,
+		UnownExtraOffset:   0xD23D1,
+		BitmapsOffset:      0xD24EF,
+		UnownBitmapsOffset: 0xD3AD3,
+		FramesOffset:       0xD4000,
+		UnownFramesOffset:  0xD99A9,
 	},
 }
 
@@ -305,7 +317,7 @@ func (rip *Ripper) pokemonSize(number int) (width, height int) {
 		TMs        [8]uint8
 	}
 	size := int64(binary.Size(&stats))
-	off := rip.info.StatsPos + size*int64(number-1)
+	off := rip.info.StatsOffset + size*int64(number-1)
 	err := binary.Read(
 		io.NewSectionReader(rip.r, off, size),
 		binary.LittleEndian,
@@ -325,22 +337,45 @@ func (rip *Ripper) pokemonSize(number int) (width, height int) {
 	return
 }
 
-func (rip *Ripper) pokemonPalette(number int) color.Palette {
-	var palettes [4]RGB15
-	off := rip.info.PalettePos + int64(binary.Size(&palettes))*int64(number)
-	r := io.NewSectionReader(rip.r, off, int64(binary.Size(&palettes)))
-	err := binary.Read(r, binary.LittleEndian, &palettes)
+// PokemonPalette returns the color palette for a Pokémon,
+// or nil if there is an error.
+func (rip *Ripper) PokemonPalette(number int) color.Palette {
+	if 1 > number || number > MaxPokemon {
+		return nil
+	}
+	return rip.pokemonPalette(number, false)
+}
+
+func (rip *Ripper) ShinyPalette(number int) color.Palette {
+	if 1 > number || number > MaxPokemon {
+		return nil
+	}
+	return rip.pokemonPalette(number, true)
+}
+
+func (rip *Ripper) pokemonPalette(number int, shiny bool) color.Palette {
+	var palette [4]RGB15
+	off := rip.info.PaletteOffset + int64(binary.Size(&palette))*int64(number)
+	r := io.NewSectionReader(rip.r, off, int64(binary.Size(&palette)))
+	err := binary.Read(r, binary.LittleEndian, &palette)
 	if err != nil {
-		// BUG: shouldn't panic
-		panic(err)
+		return nil
 	}
-	pal := color.Palette{
-		color.White,
-		palettes[0],
-		palettes[1],
-		color.Black,
+	if shiny {
+		return color.Palette{
+			color.White,
+			palette[2],
+			palette[3],
+			color.Black,
+		}
+	} else {
+		return color.Palette{
+			color.White,
+			palette[0],
+			palette[1],
+			color.Black,
+		}
 	}
-	return pal
 }
 
 type RGB15 uint16
@@ -354,12 +389,12 @@ func (rgb RGB15) RGBA() (r, g, b, a uint32) {
 }
 
 func (rip *Ripper) Pokemon(number int) (m *image.Paletted, err error) {
-	if 1 > number || number > 251 {
-		return nil, errors.New("Pokémon number out of range")
+	if 1 > number || number > MaxPokemon {
+		return nil, ErrNoSuchPokemon
 	}
 	w, h := rip.pokemonSize(number)
-	off := rip.pokemonOffset(number)
-	pal := rip.pokemonPalette(number)
+	off := rip.pokemonOffset(number, 0)
+	pal := rip.pokemonPalette(number, false)
 	//log.Printf("Ripping sprite %d, size %dx%d, offset %x", number, w, h, off)
 	rip.buf.Seek(off, 0)
 	m, err = Decode(rip.buf, w, h)
@@ -369,13 +404,33 @@ func (rip *Ripper) Pokemon(number int) (m *image.Paletted, err error) {
 	return
 }
 
+func (rip *Ripper) Unown(form string) (m *image.Paletted, err error) {
+	if len(form) != 1 || 'a' > form[0] || form[0] > 'z' {
+		return nil, ErrNoSuchPokemon
+	}
+	formi := int(form[0] - 'a')
+	w, h := rip.pokemonSize(201)
+	off := rip.pokemonOffset(201, formi)
+	pal := rip.pokemonPalette(201, false)
+	rip.buf.Seek(off, 0)
+	m, err = Decode(rip.buf, w, h)
+	if m != nil {
+		m.Palette = pal
+	}
+	return
+}
+
 func (rip *Ripper) HasAnimations() bool {
-	return rip.info.AnimPos != 0
+	return rip.info.AnimOffset != 0
+}
+
+func (rip *Ripper) Version() string {
+	return rip.info.Version
 }
 
 func (rip *Ripper) PokemonAnimation(number int) (g *gif.GIF, err error) {
-	if 1 > number || number > 251 {
-		return nil, errors.New("Pokémon number out of range")
+	if 1 > number || number > MaxPokemon {
+		return nil, ErrNoSuchPokemon
 	}
 
 	frames, err := rip.pokemonFrames(number)
@@ -383,16 +438,39 @@ func (rip *Ripper) PokemonAnimation(number int) (g *gif.GIF, err error) {
 		return nil, err
 	}
 
-	rip.buf.Seek(readNearPointerAt(rip.r, rip.info.AnimPos, number-1), 0)
+	rip.buf.Seek(readNearPointerAt(rip.r, rip.info.AnimOffset, number-1), 0)
 	animdata, err := rip.buf.ReadBytes('\xFF')
 	if err != nil {
 		return nil, err
 	}
 
-	//log.Printf("% x", animdata)
+	g = animate(animdata, frames)
+	return g, err
+}
 
-	g = new(gif.GIF)
+func (rip *Ripper) UnownAnimation(form string) (g *gif.GIF, err error) {
+	if len(form) != 1 || 'a' > form[0] || form[0] > 'z' {
+		return nil, ErrNoSuchPokemon
+	}
+	formi := int(form[0] - 'a')
 
+	frames, err := rip.unownFrames(formi)
+	if err != nil {
+		return nil, err
+	}
+
+	rip.buf.Seek(readNearPointerAt(rip.r, rip.info.UnownAnimOffset, formi), 0)
+	animdata, err := rip.buf.ReadBytes('\xFF')
+	if err != nil {
+		return nil, err
+	}
+
+	g = animate(animdata, frames)
+	return g, nil
+}
+
+func animate(animdata []byte, frames []*image.Paletted) *gif.GIF {
+	var g gif.GIF
 	var loop, clock int
 loop:
 	for pc := 0; ; pc += 2 {
@@ -418,13 +496,12 @@ loop:
 	}
 	g.Image = append(g.Image, frames[0])
 	g.Delay = append(g.Delay, clock*2*100/60-clock)
-
-	return g, nil
+	return &g
 }
 
 func (rip *Ripper) PokemonFrames(number int) ([]*image.Paletted, error) {
-	if 1 > number || number > 251 {
-		return nil, errors.New("Pokémon number out of range")
+	if 1 > number || number > MaxPokemon {
+		return nil, ErrNoSuchPokemon
 	}
 	return rip.pokemonFrames(number)
 }
@@ -432,25 +509,59 @@ func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
 	// TODO: Kinda want to just slurp in all the animation data for
 	// every sprite at once. It's all in just a couple banks.
 	// OTOH, profiling shows that this isn't a bottleneck.
-
+	offsets := animOffsets{
+		Sprite:  rip.pokemonOffset(number, 0),
+		Anim:    readNearPointerAt(rip.r, rip.info.AnimOffset, number-1),
+		Extra:   readNearPointerAt(rip.r, rip.info.ExtraOffset, number-1),
+		Frames:  readNearPointerAt(rip.r, rip.info.FramesOffset, number-1),
+		Bitmaps: readNearPointerAt(rip.r, rip.info.BitmapsOffset, number-1),
+	}
+	if number > 151 {
+		offsets.Frames += 0x4000
+	}
 	w, h := rip.pokemonSize(number)
-	palette := rip.pokemonPalette(number)
+	palette := rip.pokemonPalette(number, false)
+	return rip.frames(offsets, palette, w, h)
+}
+
+func (rip *Ripper) unownFrames(form int) ([]*image.Paletted, error) {
+	offsets := animOffsets{
+		Sprite:  rip.pokemonOffset(201, form),
+		Anim:    readNearPointerAt(rip.r, rip.info.UnownAnimOffset, form),
+		Extra:   readNearPointerAt(rip.r, rip.info.UnownExtraOffset, form),
+		Frames:  readNearPointerAt(rip.r, rip.info.UnownFramesOffset, form),
+		Bitmaps: readNearPointerAt(rip.r, rip.info.UnownBitmapsOffset, form),
+	}
+	w, h := rip.pokemonSize(201)
+	palette := rip.pokemonPalette(201, false)
+	return rip.frames(offsets, palette, w, h)
+}
+
+type animOffsets struct {
+	Sprite  int64
+	Anim    int64
+	Extra   int64
+	Frames  int64
+	Bitmaps int64
+}
+
+func (rip *Ripper) frames(offsets animOffsets, palette color.Palette, w, h int) ([]*image.Paletted, error) {
 	buf := rip.buf
 
-	buf.Seek(rip.pokemonOffset(number), 0)
+	buf.Seek(offsets.Sprite, 0)
 	tiledata, err := decodeTiles(buf, w*h*16*2)
 	if err != nil {
 		return nil, err
 	}
 
-	buf.Seek(readNearPointerAt(rip.r, rip.info.AnimPos, number-1), 0)
+	buf.Seek(offsets.Anim, 0)
 	animdata, err := buf.ReadBytes('\xFF')
 	if err != nil {
 		return nil, err
 	}
 	//fmt.Fprintf(os.Stderr, "%x\n", animdata)
 
-	buf.Seek(readNearPointerAt(rip.r, rip.info.ExtraPos, number-1), 0)
+	buf.Seek(offsets.Extra, 0)
 	extradata, err := buf.ReadBytes('\xFF')
 	if err != nil {
 		return nil, err
@@ -472,8 +583,7 @@ func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
 
 	bitmaplen := (w*h + 7) / 8 // 1 pixel per tile
 	bitmapdata := make([]byte, bitmaplen*nframes)
-	off := readNearPointerAt(rip.r, rip.info.BitmapsPos, number-1)
-	_, err = rip.r.ReadAt(bitmapdata, off)
+	_, err = rip.r.ReadAt(bitmapdata, offsets.Bitmaps)
 	if err != nil {
 		return nil, err
 	}
@@ -483,14 +593,8 @@ func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
 	var m = image.NewPaletted(image.Rect(0, 0, w*8, h*8), palette)
 	untile(m, tiledata)
 	frames[0] = m
-
-	off = readNearPointerAt(rip.r, rip.info.FramesPos, number-1)
-	if number > 151 {
-		off += 0x4000
-	}
-
 	for i := 0; i < nframes; i++ {
-		buf.Seek(readNearPointerAt(rip.r, off, i), 0)
+		buf.Seek(readNearPointerAt(rip.r, offsets.Frames, i), 0)
 		bn, _ := buf.ReadByte()
 		//fmt.Fprintf(os.Stderr, "bitmap %d\n", bn)
 		if int(bn) > nframes {
@@ -517,18 +621,13 @@ func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
 	return frames, nil
 }
 
-func (rip *Ripper) pokemonOffset(number int) (off int64) {
-	var n int
+func (rip *Ripper) pokemonOffset(number int, form int) (off int64) {
 	if number == 201 {
-		off = rip.info.UnownSpritePos
-		/*if form != "" && 'a' <= form[0] && form[0] <= 'z' {
-			n = 2 * (form[0] - 'a')
-		}*/
+		off = readFarPointerAt(rip.r, rip.info.UnownSpriteOffset, 2*form)
 	} else {
-		off = rip.info.SpritePos
-		n = 2 * (number - 1)
+		off = readFarPointerAt(rip.r, rip.info.SpriteOffset, 2*(number-1))
 	}
-	off = readFarPointerAt(rip.r, off, n)
+
 	if rip.info.Title == "PM_CRYSTAL" {
 		off += 0x36 << 14
 	} else {
@@ -536,7 +635,7 @@ func (rip *Ripper) pokemonOffset(number int) (off int64) {
 		case 0x13, 0x14:
 			off += 0xC << 14
 		case 0x1F:
-			off += (0x2E - 0x1F) << 14
+			off += 0xF << 14
 		}
 	}
 
