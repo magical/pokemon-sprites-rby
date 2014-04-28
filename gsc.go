@@ -43,7 +43,7 @@ var (
 	ErrNoSuchPokemon = errors.New("Pokémon number out of range")
 )
 
-var UnownForms = []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"}
+var UnownForms = []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"}
 
 // Decode a GSC image of dimensions w*8 x h*8.
 func Decode(reader io.Reader, w, h int) (*image.Paletted, error) {
