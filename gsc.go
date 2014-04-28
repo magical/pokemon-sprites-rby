@@ -39,6 +39,7 @@ const MaxPokemon = 251
 var (
 	ErrMalformed     = errors.New("malformed data")
 	ErrTooLarge      = errors.New("decompressed data is suspeciously large")
+	ErrTooSmall      = errors.New("decompressed data is too short")
 	ErrNoSuchPokemon = errors.New("Pokémon number out of range")
 )
 
@@ -49,6 +50,9 @@ func Decode(reader io.Reader, w, h int) (*image.Paletted, error) {
 	data, err := decodeTiles(newByteReader(reader), w*h*16*2)
 	if err != nil {
 		return nil, err
+	}
+	if len(data) < w*h*16 {
+		return nil, ErrTooSmall
 	}
 	var m = image.NewPaletted(image.Rect(0, 0, w*8, h*8), nil)
 	untile(m, data)
@@ -343,15 +347,20 @@ func (rip *Ripper) PokemonPalette(number int) color.Palette {
 	if 1 > number || number > MaxPokemon {
 		return nil
 	}
-	return rip.pokemonPalette(number, false)
+	return rip.pokemonPalette(number, normal)
 }
 
 func (rip *Ripper) ShinyPalette(number int) color.Palette {
 	if 1 > number || number > MaxPokemon {
 		return nil
 	}
-	return rip.pokemonPalette(number, true)
+	return rip.pokemonPalette(number, shiny)
 }
+
+const (
+	normal = false
+	shiny = true
+)
 
 func (rip *Ripper) pokemonPalette(number int, shiny bool) color.Palette {
 	var palette [4]RGB15
@@ -393,9 +402,24 @@ func (rip *Ripper) Pokemon(number int) (m *image.Paletted, err error) {
 		return nil, ErrNoSuchPokemon
 	}
 	w, h := rip.pokemonSize(number)
-	off := rip.pokemonOffset(number, 0)
-	pal := rip.pokemonPalette(number, false)
+	off := rip.pokemonOffset(number, 0, front)
+	pal := rip.pokemonPalette(number, normal)
 	//log.Printf("Ripping sprite %d, size %dx%d, offset %x", number, w, h, off)
+	rip.buf.Seek(off, 0)
+	m, err = Decode(rip.buf, w, h)
+	if m != nil {
+		m.Palette = pal
+	}
+	return
+}
+
+func (rip *Ripper) PokemonBack(number int) (m *image.Paletted, err error) {
+	if 1 > number || number > MaxPokemon {
+		return nil, ErrNoSuchPokemon
+	}
+	w, h := 6, 6
+	off := rip.pokemonOffset(number, 0, back)
+	pal := rip.pokemonPalette(number, normal)
 	rip.buf.Seek(off, 0)
 	m, err = Decode(rip.buf, w, h)
 	if m != nil {
@@ -410,8 +434,24 @@ func (rip *Ripper) Unown(form string) (m *image.Paletted, err error) {
 	}
 	formi := int(form[0] - 'a')
 	w, h := rip.pokemonSize(201)
-	off := rip.pokemonOffset(201, formi)
-	pal := rip.pokemonPalette(201, false)
+	off := rip.pokemonOffset(201, formi, front)
+	pal := rip.pokemonPalette(201, normal)
+	rip.buf.Seek(off, 0)
+	m, err = Decode(rip.buf, w, h)
+	if m != nil {
+		m.Palette = pal
+	}
+	return
+}
+
+func (rip *Ripper) UnownBack(form string) (m *image.Paletted, err error) {
+	if len(form) != 1 || 'a' > form[0] || form[0] > 'z' {
+		return nil, ErrNoSuchPokemon
+	}
+	formi := int(form[0] - 'a')
+	w, h := 6, 6
+	off := rip.pokemonOffset(201, formi, back)
+	pal := rip.pokemonPalette(201, normal)
 	rip.buf.Seek(off, 0)
 	m, err = Decode(rip.buf, w, h)
 	if m != nil {
@@ -510,7 +550,7 @@ func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
 	// every sprite at once. It's all in just a couple banks.
 	// OTOH, profiling shows that this isn't a bottleneck.
 	offsets := animOffsets{
-		Sprite:  rip.pokemonOffset(number, 0),
+		Sprite:  rip.pokemonOffset(number, 0, front),
 		Anim:    readNearPointerAt(rip.r, rip.info.AnimOffset, number-1),
 		Extra:   readNearPointerAt(rip.r, rip.info.ExtraOffset, number-1),
 		Frames:  readNearPointerAt(rip.r, rip.info.FramesOffset, number-1),
@@ -520,20 +560,20 @@ func (rip *Ripper) pokemonFrames(number int) ([]*image.Paletted, error) {
 		offsets.Frames += 0x4000
 	}
 	w, h := rip.pokemonSize(number)
-	palette := rip.pokemonPalette(number, false)
+	palette := rip.pokemonPalette(number, normal)
 	return rip.frames(offsets, palette, w, h)
 }
 
 func (rip *Ripper) unownFrames(form int) ([]*image.Paletted, error) {
 	offsets := animOffsets{
-		Sprite:  rip.pokemonOffset(201, form),
+		Sprite:  rip.pokemonOffset(201, form, front),
 		Anim:    readNearPointerAt(rip.r, rip.info.UnownAnimOffset, form),
 		Extra:   readNearPointerAt(rip.r, rip.info.UnownExtraOffset, form),
 		Frames:  readNearPointerAt(rip.r, rip.info.UnownFramesOffset, form),
 		Bitmaps: readNearPointerAt(rip.r, rip.info.UnownBitmapsOffset, form),
 	}
 	w, h := rip.pokemonSize(201)
-	palette := rip.pokemonPalette(201, false)
+	palette := rip.pokemonPalette(201, normal)
 	return rip.frames(offsets, palette, w, h)
 }
 
@@ -621,12 +661,19 @@ func (rip *Ripper) frames(offsets animOffsets, palette color.Palette, w, h int) 
 	return frames, nil
 }
 
-func (rip *Ripper) pokemonOffset(number int, form int) (off int64) {
+const (
+	front = iota
+	back
+)
+
+func (rip *Ripper) pokemonOffset(number int, form int, facing int) (off int64) {
+	base := rip.info.SpriteOffset
+	n := number - 1
 	if number == 201 {
-		off = readFarPointerAt(rip.r, rip.info.UnownSpriteOffset, 2*form)
-	} else {
-		off = readFarPointerAt(rip.r, rip.info.SpriteOffset, 2*(number-1))
+		base = rip.info.UnownSpriteOffset
+		n = form
 	}
+	off = readFarPointerAt(rip.r, base, 2*n+facing)
 
 	if rip.info.Title == "PM_CRYSTAL" {
 		off += 0x36 << 14

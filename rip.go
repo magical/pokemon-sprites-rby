@@ -154,25 +154,23 @@ func ripBatchFilename(filename string) error {
 		return err
 	}
 	version := rip.Version()
+	outdir := filepath.Join(outname, version)
 	var things = []struct {
-		name    string
 		fn      func(rip *sprites.Ripper, n int, form string, outname string) error
+		dirname string
 		ext     string
 		enabled bool
-		dirname string
 	}{
-		{"pokemon", ripPokemon, ".png", true,
-			filepath.Join(outname, version)},
-		{"shiny pokemon", ripShinyPokemon, ".png", true,
-			filepath.Join(outname, version, "shiny")},
-		{"animated pokemon", ripAnimation, ".gif", rip.HasAnimations(),
-			filepath.Join(outname, version, "animated")},
-		{"shiny animated pokemon", ripShinyAnimation, ".gif", rip.HasAnimations(),
-			filepath.Join(outname, version, "animated", "shiny")},
+		{ripPokemon, "", ".png", true},
+		{ripPokemonBack, "back", ".png", true},
+		{ripShinyPokemon, "shiny", ".png", true},
+		{ripPokemonBack, "back/shiny", ".png", true},
+		{ripAnimation, "animated", ".gif", rip.HasAnimations()},
+		{ripShinyAnimation, "animated/shiny", ".gif", rip.HasAnimations()},
 	}
 	for _, t := range things {
 		if t.enabled {
-			err = os.Mkdir(t.dirname, 0777)
+			err = os.Mkdir(filepath.Join(outdir, filepath.FromSlash(t.dirname)), 0777)
 			if err != nil && !os.IsExist(err) {
 				return err
 			}
@@ -183,9 +181,10 @@ func ripBatchFilename(filename string) error {
 			if !t.enabled {
 				continue
 			}
-			err := t.fn(rip, n, "", filepath.Join(t.dirname, strconv.Itoa(n)+t.ext))
+			name := filepath.Join(filepath.FromSlash(t.dirname), strconv.Itoa(n))
+			err := t.fn(rip, n, "", filepath.Join(outdir, name+t.ext))
 			if err != nil {
-				log.Printf("%s %d: %s", t.name, n, err)
+				log.Printf("%s: %s", name, err)
 			}
 		}
 	}
@@ -194,9 +193,10 @@ func ripBatchFilename(filename string) error {
 			if !t.enabled {
 				continue
 			}
-			err := t.fn(rip, 201, form, filepath.Join(t.dirname, "201-"+form+t.ext))
+			name := filepath.Join(filepath.FromSlash(t.dirname), "201-" + form)
+			err := t.fn(rip, 201, form, filepath.Join(outdir, name+t.ext))
 			if err != nil {
-				log.Printf("%s %d-%s: %s", t.name, 201, form, err)
+				log.Printf("%s: %s", name, err)
 			}
 		}
 	}
@@ -224,6 +224,20 @@ func ripPokemon(rip *sprites.Ripper, number int, form string, outname string) er
 		m, err = rip.Unown(form)
 	} else {
 		m, err = rip.Pokemon(number)
+	}
+	if err != nil {
+		return err
+	}
+	return write(m, outname)
+}
+
+func ripPokemonBack(rip *sprites.Ripper, number int, form string, outname string) error {
+	var m *image.Paletted
+	var err error
+	if number == 201 && form != "" {
+		m, err = rip.UnownBack(form)
+	} else {
+		m, err = rip.PokemonBack(number)
 	}
 	if err != nil {
 		return err
