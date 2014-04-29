@@ -164,7 +164,7 @@ func ripBatchFilename(filename string) error {
 		{ripPokemon, "", ".png", true},
 		{ripPokemonBack, "back", ".png", true},
 		{ripShinyPokemon, "shiny", ".png", true},
-		{ripPokemonBack, "back/shiny", ".png", true},
+		{ripShinyPokemonBack, "back/shiny", ".png", true},
 		{ripAnimation, "animated", ".gif", rip.HasAnimations()},
 		{ripShinyAnimation, "animated/shiny", ".gif", rip.HasAnimations()},
 	}
@@ -255,6 +255,24 @@ func ripShinyPokemon(rip *sprites.Ripper, number int, form string, outname strin
 		m, err = rip.Unown(form)
 	} else {
 		m, err = rip.Pokemon(number)
+	}
+	if err != nil {
+		return err
+	}
+	m.Palette = rip.ShinyPalette(number)
+	if m.Palette == nil {
+		return errors.New("couldn't get palette")
+	}
+	return write(m, outname)
+}
+
+func ripShinyPokemonBack(rip *sprites.Ripper, number int, form string, outname string) error {
+	var m *image.Paletted
+	var err error
+	if number == 201 && form != "" {
+		m, err = rip.UnownBack(form)
+	} else {
+		m, err = rip.PokemonBack(number)
 	}
 	if err != nil {
 		return err
