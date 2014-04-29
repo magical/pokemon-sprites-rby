@@ -35,23 +35,25 @@ import (
 */
 
 const MaxPokemon = 251
+const MaxTrainer = 67
 
 var (
 	ErrMalformed     = errors.New("malformed data")
 	ErrTooLarge      = errors.New("decompressed data is suspeciously large")
 	ErrTooSmall      = errors.New("decompressed data is too short")
-	ErrNoSuchPokemon = errors.New("Pokémon number out of range")
+	ErrNoSuchPokemon = errors.New("no such Pokémon")
+	ErrNoSuchTrainer = errors.New("no such trainer")
 )
 
 var UnownForms = []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"}
 
 // Decode a GSC image of dimensions w*8 x h*8.
 func Decode(reader io.Reader, w, h int) (*image.Paletted, error) {
-	data, err := decodeTiles(newByteReader(reader), w*h*16*2)
+	data, err := decodeTiles(newByteReader(reader), w*h*8*2*2)
 	if err != nil {
 		return nil, err
 	}
-	if len(data) < w*h*16 {
+	if len(data) < w*h*8*2 {
 		return nil, ErrTooSmall
 	}
 	var m = image.NewPaletted(image.Rect(0, 0, w*8, h*8), nil)
@@ -186,12 +188,14 @@ func mingle(x, y uint16) uint16 {
 }
 
 type romInfo struct {
-	Title             string
-	Version           string
-	StatsOffset       int64
-	PaletteOffset     int64
-	SpriteOffset      int64
-	UnownSpriteOffset int64
+	Title                string
+	Version              string
+	StatsOffset          int64
+	PaletteOffset        int64
+	SpriteOffset         int64
+	UnownSpriteOffset    int64
+	TrainerOffset        int64
+	TrainerPaletteOffset int64
 
 	AnimOffset         int64
 	ExtraOffset        int64
@@ -205,29 +209,35 @@ type romInfo struct {
 
 var romtab = map[string]romInfo{
 	"POKEMON_GLD": {
-		Title:             "POKEMON_GLD",
-		Version:           "gold",
-		StatsOffset:       0x51B0B,
-		PaletteOffset:     0xAD3D,
-		SpriteOffset:      0x48000,
-		UnownSpriteOffset: 0x7C000,
+		Title:                "POKEMON_GLD",
+		Version:              "gold",
+		StatsOffset:          0x51B0B,
+		PaletteOffset:        0xAD3D,
+		SpriteOffset:         0x48000,
+		UnownSpriteOffset:    0x7C000,
+		TrainerOffset:        0x80000,
+		TrainerPaletteOffset: 0xB541,
 	},
 	"POKEMON_SLV": {
 		// Same as Gold
-		Title:             "POKEMON_SLV",
-		Version:           "silver",
-		StatsOffset:       0x51B0B,
-		PaletteOffset:     0xAD3D,
-		SpriteOffset:      0x48000,
-		UnownSpriteOffset: 0x7C000,
+		Title:                "POKEMON_SLV",
+		Version:              "silver",
+		StatsOffset:          0x51B0B,
+		PaletteOffset:        0xAD3D,
+		SpriteOffset:         0x48000,
+		UnownSpriteOffset:    0x7C000,
+		TrainerOffset:        0x80000,
+		TrainerPaletteOffset: 0xB541,
 	},
 	"PM_CRYSTAL": {
-		Title:             "PM_CRYSTAL",
-		Version:           "crystal",
-		StatsOffset:       0x51424,
-		PaletteOffset:     0xA8CE,
-		SpriteOffset:      0x120000,
-		UnownSpriteOffset: 0x124000,
+		Title:                "PM_CRYSTAL",
+		Version:              "crystal",
+		StatsOffset:          0x51424,
+		PaletteOffset:        0xA8CE,
+		SpriteOffset:         0x120000,
+		UnownSpriteOffset:    0x124000,
+		TrainerOffset:        0x128000,
+		TrainerPaletteOffset: 0xB0CE + 4,
 
 		AnimOffset:         0xD0695,
 		ExtraOffset:        0xD16A3,
@@ -358,32 +368,29 @@ func (rip *Ripper) ShinyPalette(number int) color.Palette {
 }
 
 const (
-	normal = false
-	shiny = true
+	normal = 0
+	shiny  = 1
 )
 
-func (rip *Ripper) pokemonPalette(number int, shiny bool) color.Palette {
-	var palette [4]RGB15
-	off := rip.info.PaletteOffset + int64(binary.Size(&palette))*int64(number)
-	r := io.NewSectionReader(rip.r, off, int64(binary.Size(&palette)))
-	err := binary.Read(r, binary.LittleEndian, &palette)
+func (rip *Ripper) pokemonPalette(number int, shiny int) color.Palette {
+	return ripPalette(rip.r, rip.info.PaletteOffset, number*2+shiny)
+}
+
+func (rip *Ripper) trainerPalette(number int) color.Palette {
+	return ripPalette(rip.r, rip.info.TrainerPaletteOffset, number)
+}
+
+func ripPalette(r io.ReaderAt, off int64, n int) color.Palette {
+	var palette [4]byte
+	_, err := r.ReadAt(palette[:], off+int64(n)*int64(len(palette)))
 	if err != nil {
 		return nil
 	}
-	if shiny {
-		return color.Palette{
-			color.White,
-			palette[2],
-			palette[3],
-			color.Black,
-		}
-	} else {
-		return color.Palette{
-			color.White,
-			palette[0],
-			palette[1],
-			color.Black,
-		}
+	return color.Palette{
+		color.White,
+		RGB15(int16(palette[0]) + int16(palette[1])<<8),
+		RGB15(int16(palette[2]) + int16(palette[3])<<8),
+		color.Black,
 	}
 }
 
@@ -452,6 +459,21 @@ func (rip *Ripper) UnownBack(form string) (m *image.Paletted, err error) {
 	w, h := 6, 6
 	off := rip.pokemonOffset(201, formi, back)
 	pal := rip.pokemonPalette(201, normal)
+	rip.buf.Seek(off, 0)
+	m, err = Decode(rip.buf, w, h)
+	if m != nil {
+		m.Palette = pal
+	}
+	return
+}
+
+func (rip *Ripper) Trainer(number int) (m *image.Paletted, err error) {
+	if 1 > number {
+		return nil, ErrNoSuchTrainer
+	}
+	w, h := 7, 7
+	off := rip.farPointer(rip.info.TrainerOffset, number-1)
+	pal := rip.trainerPalette(number - 1)
 	rip.buf.Seek(off, 0)
 	m, err = Decode(rip.buf, w, h)
 	if m != nil {
@@ -589,7 +611,7 @@ func (rip *Ripper) frames(offsets animOffsets, palette color.Palette, w, h int) 
 	buf := rip.buf
 
 	buf.Seek(offsets.Sprite, 0)
-	tiledata, err := decodeTiles(buf, w*h*16*2)
+	tiledata, err := decodeTiles(buf, w*h*8*2*2)
 	if err != nil {
 		return nil, err
 	}
@@ -629,7 +651,7 @@ func (rip *Ripper) frames(offsets animOffsets, palette color.Palette, w, h int) 
 	}
 
 	var frames = make([]*image.Paletted, nframes+1)
-	var data = make([]uint8, w*h*16)
+	var data = make([]uint8, w*h*8*2)
 	var m = image.NewPaletted(image.Rect(0, 0, w*8, h*8), palette)
 	untile(m, tiledata)
 	frames[0] = m
@@ -673,8 +695,12 @@ func (rip *Ripper) pokemonOffset(number int, form int, facing int) (off int64) {
 		base = rip.info.UnownSpriteOffset
 		n = form
 	}
-	off = readFarPointerAt(rip.r, base, 2*n+facing)
+	off = rip.farPointer(base, 2*n+facing)
+	return off
+}
 
+func (rip *Ripper) farPointer(base int64, n int) int64 {
+	off := readFarPointerAt(rip.r, base, n)
 	if rip.info.Title == "PM_CRYSTAL" {
 		off += 0x36 << 14
 	} else {
@@ -685,7 +711,6 @@ func (rip *Ripper) pokemonOffset(number int, form int, facing int) (off int64) {
 			off += 0xF << 14
 		}
 	}
-
 	return off
 }
 

@@ -21,18 +21,20 @@ import (
 )
 
 var (
-	animflag   bool
-	framesflag bool
-	batch      bool
-	number     int
-	outname    string
-	profile    string
+	animFlag    bool
+	framesFlag  bool
+	trainerFlag bool
+	batch       bool
+	number      int
+	outname     string
+	profile     string
 )
 
 func main() {
 	flag.BoolVar(&batch, "all", false, "rip all sprites")
-	flag.BoolVar(&animflag, "anim", false, "rip animation")
-	flag.BoolVar(&framesflag, "frames", false, "rip frames")
+	flag.BoolVar(&animFlag, "anim", false, "rip animation")
+	flag.BoolVar(&framesFlag, "frames", false, "rip frames")
+	flag.BoolVar(&trainerFlag, "trainer", false, "rip trainer")
 	flag.IntVar(&number, "n", 0, "number of pokemon")
 	flag.StringVar(&outname, "out", "", "output file or directory")
 	flag.StringVar(&profile, "profile", "", "save profile data")
@@ -50,10 +52,10 @@ func main() {
 	}
 
 	var err error
-	if number != 0 {
-		err = ripSingle()
-	} else {
+	if batch {
 		err = ripBatch()
+	} else {
+		err = ripSingle()
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -72,13 +74,19 @@ func ripSingle() error {
 		return err
 	}
 
-	if animflag && rip.HasAnimations() {
+	if trainerFlag {
+		m, err := rip.Trainer(number)
+		if err != nil {
+			return err
+		}
+		return write(m, outname)
+	} else if animFlag && rip.HasAnimations() {
 		g, err := rip.PokemonAnimation(number)
 		if err != nil {
 			return err
 		}
 		return write(g, outname)
-	} else if framesflag && rip.HasAnimations() {
+	} else if framesFlag && rip.HasAnimations() {
 		frames, err := rip.PokemonFrames(number)
 		if err != nil {
 			return err
@@ -114,6 +122,8 @@ func setPalette(v interface{}, pal color.Palette) {
 	}
 }
 
+// Write writes a *image.Paletted or *gif.GIF to the file named by outname.
+// If outname is "", it writes to os.Stdout.
 func write(v interface{}, outname string) (err error) {
 	f := os.Stdout
 	if outname != "" {
@@ -170,7 +180,7 @@ func ripBatchFilename(filename string) error {
 	}
 	for _, t := range things {
 		if t.enabled {
-			err = os.Mkdir(filepath.Join(outdir, filepath.FromSlash(t.dirname)), 0777)
+			err = os.MkdirAll(filepath.Join(outdir, filepath.FromSlash(t.dirname)), 0777)
 			if err != nil && !os.IsExist(err) {
 				return err
 			}
@@ -189,15 +199,28 @@ func ripBatchFilename(filename string) error {
 		}
 	}
 	for _, form := range sprites.UnownForms {
-		for _, t := range things{
+		for _, t := range things {
 			if !t.enabled {
 				continue
 			}
-			name := filepath.Join(filepath.FromSlash(t.dirname), "201-" + form)
+			name := filepath.Join(filepath.FromSlash(t.dirname), "201-"+form)
 			err := t.fn(rip, 201, form, filepath.Join(outdir, name+t.ext))
 			if err != nil {
 				log.Printf("%s: %s", name, err)
 			}
+		}
+	}
+	os.MkdirAll(filepath.Join(outdir, "trainers"), 0777)
+	for n := 1; n <= sprites.MaxTrainer; n++ {
+		name := filepath.Join("trainers", strconv.Itoa(n))
+		m, err := rip.Trainer(n)
+		if err != nil {
+			log.Printf("%s: %s", name, err)
+			continue
+		}
+		err = write(m, filepath.Join(outdir, name+".png"))
+		if err != nil {
+			log.Printf("%s: %s", name, err)
 		}
 	}
 	return nil
