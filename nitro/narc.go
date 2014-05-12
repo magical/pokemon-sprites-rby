@@ -20,9 +20,6 @@ type NARC struct {
 }
 
 type _FATB struct {
-	Magic [4]byte
-	Size  uint32
-
 	FileCount uint32
 }
 
@@ -61,24 +58,18 @@ type ReadSeekerAt interface {
 func ReadNARC(r ReadSeekerAt) (*NARC, error) {
 	narc := new(NARC)
 
-	err := binary.Read(r, binary.LittleEndian, &narc.header)
+	err := readNitroHeader(r, "NARC", &narc.header)
 	if err != nil {
 		return nil, err
-	}
-	if string(narc.header.Magic[:]) != "NARC" {
-		return nil, errBadMagic
 	}
 
-	err = binary.Read(r, binary.LittleEndian, &narc.fatb)
+	chunk, err := readChunk(r, "BTAF", &narc.fatb)
 	if err != nil {
 		return nil, err
-	}
-	if string(narc.fatb.Magic[:]) != "BTAF" {
-		return nil, chunkError{string(narc.fatb.Magic[:]), "BTAF"}
 	}
 
 	narc.records = make([]fatRecord, narc.fatb.FileCount)
-	err = binary.Read(r, binary.LittleEndian, &narc.records)
+	err = binary.Read(chunk, binary.LittleEndian, &narc.records)
 	if err != nil {
 		return nil, err
 	}
@@ -107,9 +98,6 @@ func ReadNARC(r ReadSeekerAt) (*NARC, error) {
 	size := int64(narc.fimg.Size) - 8
 	if err != nil {
 		return nil, err
-	}
-	if size < 0 {
-		size = 0
 	}
 	narc.data = io.NewSectionReader(r, off, size)
 
@@ -156,4 +144,20 @@ func (narc *NARC) OpenRaw(n int) (*io.SectionReader, error) {
 		size = 0
 	}
 	return io.NewSectionReader(narc.data, int64(rec.Start), size), nil
+}
+
+func (narc *NARC) OpenNCGR(n int) (*NCGR, error) {
+	r, err := narc.Open(n)
+	if err != nil {
+		return nil, err
+	}
+	return ReadNCGR(r)
+}
+
+func (narc *NARC) OpenNCLR(n int) (*NCLR, error) {
+	r, err := narc.Open(n)
+	if err != nil {
+		return nil, err
+	}
+	return ReadNCLR(r)
 }
