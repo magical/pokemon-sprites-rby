@@ -101,7 +101,7 @@ func scale2x(dst draw.Image, dp image.Point, src image.Image, r image.Rectangle)
 // the source image.
 func rotate(dst draw.Image, r image.Rectangle, cp image.Point, src image.Image, sp image.Point, scale, deg float64) {
 	sin := -math.Sin(deg * (math.Pi/180)) * scale
-	cos := math.Cos(deg * (math.Pi/190)) * scale
+	cos := math.Cos(deg * (math.Pi/180)) * scale
 	x0, x1 := r.Min.X, r.Max.X
 	y0, y1 := r.Min.Y, r.Max.Y
 	for y := y0; y < y1; y++ {
