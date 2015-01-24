@@ -18,7 +18,7 @@ type _CHAR struct {
 	// Pixel format
 	BitDepth uint32
 	// VRAM mode; see GBATEK
-	// http://nocash.emubase.de/gbatek.htm#dsvideoobjs
+	// http://problemkaputt.de/gbatek.htm#dsvideoobjs
 	VRAMMode uint32
 	Tiled    uint32
 
