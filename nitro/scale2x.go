@@ -53,23 +53,23 @@ func scale8x(m image.Image) image.Image {
 
 // Scale2x scales up an image with the scale2x algorithm.
 func scale2x(dst draw.Image, dp image.Point, src image.Image, r image.Rectangle) {
-	x0, x1 := r.Min.X, r.Max.X
-	y0, y1 := r.Min.Y, r.Max.Y
-	for dy, y := dp.Y, y0; y < y1; dy, y = dy+2, y+1 {
-		for dx, x := dp.X, x0; x < x1; dx, x = dx+2, x+1 {
+	xlo, xhi := r.Min.X, r.Max.X
+	ylo, yhi := r.Min.Y, r.Max.Y
+	for dy, y := dp.Y, ylo; y < yhi; dy, y = dy+2, y+1 {
+		for dx, x := dp.X, xlo; x < xhi; dx, x = dx+2, x+1 {
 			// Source pixels
 			c := src.At(x, y)
 			t, l, r, b := c, c, c, c
-			if y - 1 >= y0 {
+			if y - 1 >= ylo {
 				t = src.At(x, y-1)
 			}
-			if y + 1 < y1 {
+			if y + 1 < yhi {
 				b = src.At(x, y+1)
 			}
-			if x - 1 >= x0 {
+			if x - 1 >= xlo {
 				l = src.At(x-1, y)
 			}
-			if x + 1 < x1 {
+			if x + 1 < xhi {
 				r = src.At(x+1, y)
 			}
 			// Destination pixels
@@ -102,10 +102,10 @@ func scale2x(dst draw.Image, dp image.Point, src image.Image, r image.Rectangle)
 func rotate(dst draw.Image, r image.Rectangle, cp image.Point, src image.Image, sp image.Point, scale, deg float64) {
 	sin := -math.Sin(deg * (math.Pi/180)) * scale
 	cos := math.Cos(deg * (math.Pi/180)) * scale
-	x0, x1 := r.Min.X, r.Max.X
-	y0, y1 := r.Min.Y, r.Max.Y
-	for y := y0; y < y1; y++ {
-		for x := x0; x < x1; x++ {
+	xlo, xhi := r.Min.X, r.Max.X
+	ylo, yhi := r.Min.Y, r.Max.Y
+	for y := ylo; y < yhi; y++ {
+		for x := xlo; x < xhi; x++ {
 			sx := sp.X + int(float64(x-cp.X)*cos - float64(y-cp.Y)*sin)
 			sy := sp.Y + int(float64(x-cp.X)*sin + float64(y-cp.Y)*cos)
 			dst.Set(x, y, src.At(sx, sy))
