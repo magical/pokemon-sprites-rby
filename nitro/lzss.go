@@ -86,8 +86,10 @@ func decode11(r io.ByteReader) ([]byte, error) {
 				continue
 			}
 			n := int(nextbyte())<<8 + int(nextbyte())
-			count := 1
+			count := 0
 			switch n>>12 {
+			default:
+				count = 1
 			case 0:
 				n = n&0xFFF<<8 + int(nextbyte())
 				count = 0x11
@@ -97,7 +99,7 @@ func decode11(r io.ByteReader) ([]byte, error) {
 				count = 0x111
 			}
 			count += n >> 12
-			disp := n & 0xFFF
+			disp := n & 0xFFF + 1
 			if disp > len(data) {
 				return nil, errMalformed
 			}
