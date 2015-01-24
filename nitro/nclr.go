@@ -6,6 +6,14 @@ import (
 	"image/color"
 )
 
+// A NCLR (nitro color resource) defines a color palette.
+type NCLR struct {
+	header Header
+	pltt   _PLTT
+
+	Colors []RGB15
+}
+
 type _PLTT struct {
 	Magic [4]byte
 	Size uint32
@@ -15,12 +23,6 @@ type _PLTT struct {
 	DataOffset uint32
 }
 
-type NCLR struct {
-	header Header
-	pltt   _PLTT
-
-	Colors []RGB15
-}
 
 func ReadNCLR(r io.Reader) (*NCLR, error) {
 	nclr := new(NCLR)
