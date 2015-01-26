@@ -5,10 +5,6 @@ import (
 	"errors"
 )
 
-type lzReader struct {
-	r io.ByteReader
-}
-
 var errMalformed = errors.New("LZSS: malformed data")
 
 // decode lzss10
