@@ -6,6 +6,7 @@ import (
 	"io"
 )
 
+// A Header is the common header used in all nitro formats.
 type Header struct {
 	Magic      [4]byte
 	BOM        uint16

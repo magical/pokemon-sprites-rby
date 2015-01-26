@@ -8,6 +8,7 @@ import (
 	"io"
 )
 
+// An NARC (nitro archive) holds files.
 type NARC struct {
 	header Header
 	fatb   _FATB
@@ -104,10 +105,15 @@ func ReadNARC(r ReadSeekerAt) (*NARC, error) {
 	return narc, nil
 }
 
+// FileCount returns the number of files in the archive.
+//
+// TODO: better name.
 func (narc *NARC) FileCount() int {
 	return len(narc.records)
 }
 
+// Open opens the nth file in the archive.
+// It will attempt to decompress compressed files.
 func (narc *NARC) Open(n int) (readerSize, error) {
 	sr, err := narc.OpenRaw(n)
 	if err != nil {
@@ -134,6 +140,7 @@ func (b *bytesReaderSize) Size() int64 {
 	return int64(b.size)
 }
 
+// OpenRaw opens the nth file in the archive, without attempting to decompress it.
 func (narc *NARC) OpenRaw(n int) (*io.SectionReader, error) {
 	if n < 0 || n > len(narc.records) {
 		return nil, errors.New("NARC.Open: no such file")
@@ -146,6 +153,7 @@ func (narc *NARC) OpenRaw(n int) (*io.SectionReader, error) {
 	return io.NewSectionReader(narc.data, int64(rec.Start), size), nil
 }
 
+// OpenNCGR calls ReadNCGR(narc.Open(n)).
 func (narc *NARC) OpenNCGR(n int) (*NCGR, error) {
 	r, err := narc.Open(n)
 	if err != nil {
@@ -154,6 +162,7 @@ func (narc *NARC) OpenNCGR(n int) (*NCGR, error) {
 	return ReadNCGR(r)
 }
 
+// OpenNCLR calls ReadNCLR(narc.Open(n))
 func (narc *NARC) OpenNCLR(n int) (*NCLR, error) {
 	r, err := narc.Open(n)
 	if err != nil {

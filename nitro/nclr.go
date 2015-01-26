@@ -6,7 +6,7 @@ import (
 	"image/color"
 )
 
-// A NCLR (nitro color resource) defines a color palette.
+// An NCLR (nitro color resource) defines a color palette.
 type NCLR struct {
 	header Header
 	pltt   _PLTT

@@ -6,6 +6,7 @@ import (
 	"image/color"
 )
 
+// An NCGR (nitro character graphic resource) stores pixel data.
 type NCGR struct {
 	header Header
 	char   _CHAR
@@ -44,8 +45,8 @@ func ReadNCGR(r io.Reader) (*NCGR, error) {
 	return ncgr, nil
 }
 
-// Decrypt decrypts the pixel data in the NCGR. This method is used
-// for Pokémon and trainer sprites in D/P and HG/SS.
+// Decrypt decrypts the pixel data in the NCGR.
+// This method is used for Pokémon and trainer sprites in D/P and HG/SS.
 func (ncgr *NCGR) Decrypt() {
 	seed := uint32(ncgr.Data[0]) + uint32(ncgr.Data[1])<<8
 	for i := 0; i < len(ncgr.Data); i += 2 {
@@ -55,8 +56,8 @@ func (ncgr *NCGR) Decrypt() {
 	}
 }
 
-// DecryptReverse decrypts the pixel data in the NCGR. This method
-// is used for Pokémon sprites in Pt.
+// DecryptReverse decrypts the pixel data in the NCGR.
+// This method is used for Pokémon sprites in Pt.
 func (ncgr *NCGR) DecryptReverse() {
 	seed := uint32(ncgr.Data[len(ncgr.Data)-2]) +
 		uint32(ncgr.Data[len(ncgr.Data)-1])<<8
