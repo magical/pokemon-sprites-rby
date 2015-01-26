@@ -5,7 +5,7 @@ import (
 	"image/color"
 )
 
-// Tiled is a paletted image stored as a sequence of 8x8 tiles.
+// Tiled is an image.Image whose pixels are stored as a sequence of 8x8 tiles.
 // Since it is conceptually one-dimensional, its bounds may be undefined.
 type Tiled struct {
 	Pix     []uint8
@@ -17,9 +17,13 @@ type Tiled struct {
 func (t *Tiled) ColorModel() color.Model { return t.Palette }
 func (t *Tiled) Bounds() image.Rectangle { return t.Rect }
 
-// Get a subimage with the specified width and height starting at the given tile offset.
-func (t *Tiled) Tile(offset, width, height int) *Tiled {
-	if offset*64 >= len(t.Pix) {
+// Tile returns an image representing a portion of t.
+// The upper left tile of the returned image will be the nth tile in t,
+// and the tiles following the nth tile will fill the remaining width and
+// height of the returned image from left to right, top to bottom.
+// The returned value shares pixels with the original image.
+func (t *Tiled) Tile(n, width, height int) *Tiled {
+	if n*64 >= len(t.Pix) {
 		return &Tiled{
 			Palette: t.Palette,
 		}
@@ -27,7 +31,7 @@ func (t *Tiled) Tile(offset, width, height int) *Tiled {
 	r := image.Rect(0, 0, width, height)
 	stride := (width + 7) / 8
 	return &Tiled{
-		Pix:     t.Pix[offset*64:],
+		Pix:     t.Pix[n*64:],
 		Rect:    r,
 		Stride:  stride,
 		Palette: t.Palette,
