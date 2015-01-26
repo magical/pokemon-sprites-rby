@@ -1,8 +1,8 @@
 package nitro
 
 import (
-	"io"
 	"errors"
+	"io"
 )
 
 var errMalformed = errors.New("LZSS: malformed data")
@@ -40,7 +40,7 @@ func decode10(r io.ByteReader) ([]byte, error) {
 			if disp > len(data) {
 				return nil, errMalformed
 			}
-			if len(data) + count > size {
+			if len(data)+count > size {
 				count = size - len(data)
 			}
 			for j := 0; j < count; j++ {
@@ -83,7 +83,7 @@ func decode11(r io.ByteReader) ([]byte, error) {
 			}
 			n := int(nextbyte())<<8 + int(nextbyte())
 			count := 0
-			switch n>>12 {
+			switch n >> 12 {
 			default:
 				count = 1
 			case 0:
@@ -95,11 +95,11 @@ func decode11(r io.ByteReader) ([]byte, error) {
 				count = 0x111
 			}
 			count += n >> 12
-			disp := n & 0xFFF + 1
+			disp := n&0xFFF + 1
 			if disp > len(data) {
 				return nil, errMalformed
 			}
-			if len(data) + count > size {
+			if len(data)+count > size {
 				count = size - len(data)
 			}
 			for j := 0; j < count; j++ {

@@ -2,8 +2,8 @@ package nitro
 
 import (
 	"encoding/binary"
-	"io"
 	"image/color"
+	"io"
 )
 
 // An NCLR (nitro color resource) defines a color palette.
@@ -15,14 +15,13 @@ type NCLR struct {
 }
 
 type _PLTT struct {
-	Magic [4]byte
-	Size uint32
-	BitDepth uint32
-	_ uint32
-	DataSize uint32
+	Magic      [4]byte
+	Size       uint32
+	BitDepth   uint32
+	_          uint32
+	DataSize   uint32
 	DataOffset uint32
 }
-
 
 func ReadNCLR(r io.Reader) (*NCLR, error) {
 	nclr := new(NCLR)
@@ -54,9 +53,9 @@ func ReadNCLR(r io.Reader) (*NCLR, error) {
 	return nclr, nil
 }
 
-func (nclr *NCLR) Palette(n int) color.Palette  {
+func (nclr *NCLR) Palette(n int) color.Palette {
 	pal := make(color.Palette, 16)
-	for i, c := range nclr.Colors[n*16:n*16+16] {
+	for i, c := range nclr.Colors[n*16 : n*16+16] {
 		pal[i] = c
 	}
 	return pal

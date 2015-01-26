@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"github.com/magical/sprites/nitro"
-	"github.com/magical/png"
 	"os"
+
+	"github.com/magical/png"
+	"github.com/magical/sprites/nitro"
 )
 
 var _ = fmt.Println

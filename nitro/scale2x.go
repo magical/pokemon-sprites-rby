@@ -30,8 +30,8 @@ func main() {
 
 func centerOf(r image.Rectangle) (p image.Point) {
 	r = r.Canon()
-	p.X = r.Min.X + (r.Max.X - r.Min.X)/2
-	p.Y = r.Min.Y + (r.Max.Y - r.Min.Y)/2
+	p.X = r.Min.X + (r.Max.X-r.Min.X)/2
+	p.Y = r.Min.Y + (r.Max.Y-r.Min.Y)/2
 	return
 }
 
@@ -60,16 +60,16 @@ func scale2x(dst draw.Image, dp image.Point, src image.Image, r image.Rectangle)
 			// Source pixels
 			c := src.At(x, y)
 			t, l, r, b := c, c, c, c
-			if y - 1 >= ylo {
+			if y-1 >= ylo {
 				t = src.At(x, y-1)
 			}
-			if y + 1 < yhi {
+			if y+1 < yhi {
 				b = src.At(x, y+1)
 			}
-			if x - 1 >= xlo {
+			if x-1 >= xlo {
 				l = src.At(x-1, y)
 			}
-			if x + 1 < xhi {
+			if x+1 < xhi {
 				r = src.At(x+1, y)
 			}
 			// Destination pixels
@@ -100,14 +100,14 @@ func scale2x(dst draw.Image, dp image.Point, src image.Image, r image.Rectangle)
 // and scaled by 1/scale. The point sp gives the corresponding center point in
 // the source image.
 func rotate(dst draw.Image, r image.Rectangle, cp image.Point, src image.Image, sp image.Point, scale, deg float64) {
-	sin := -math.Sin(deg * (math.Pi/180)) * scale
-	cos := math.Cos(deg * (math.Pi/180)) * scale
+	sin := -math.Sin(deg*(math.Pi/180)) * scale
+	cos := math.Cos(deg*(math.Pi/180)) * scale
 	xlo, xhi := r.Min.X, r.Max.X
 	ylo, yhi := r.Min.Y, r.Max.Y
 	for y := ylo; y < yhi; y++ {
 		for x := xlo; x < xhi; x++ {
-			sx := sp.X + int(float64(x-cp.X)*cos - float64(y-cp.Y)*sin)
-			sy := sp.Y + int(float64(x-cp.X)*sin + float64(y-cp.Y)*cos)
+			sx := sp.X + int(float64(x-cp.X)*cos-float64(y-cp.Y)*sin)
+			sy := sp.Y + int(float64(x-cp.X)*sin+float64(y-cp.Y)*cos)
 			dst.Set(x, y, src.At(sx, sy))
 		}
 	}

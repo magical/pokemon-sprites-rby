@@ -163,27 +163,27 @@ func (ncgr *NCGR) Tile(i, w, h int, pal color.Palette) image.Image {
 	} else {
 		y := i / int(ncgr.char.Width) * 8
 		x := i % int(ncgr.char.Width) * 8
-		stride := int(ncgr.char.Width)*8
-		xmax := int(ncgr.char.Width)*8
-		ymax := int(ncgr.char.Height)*8
+		stride := int(ncgr.char.Width) * 8
+		xmax := int(ncgr.char.Width) * 8
+		ymax := int(ncgr.char.Height) * 8
 		if x+w >= xmax {
-			w = xmax-x
+			w = xmax - x
 		}
 		if y+h >= ymax {
-			h = ymax-y
+			h = ymax - y
 		}
 		return &image.Paletted{
-			Pix: ncgr.Pixels()[y*stride + x:],
-			Rect: image.Rect(0, 0, w, h),
-			Stride: stride,
+			Pix:     ncgr.Pixels()[y*stride+x:],
+			Rect:    image.Rect(0, 0, w, h),
+			Stride:  stride,
 			Palette: pal,
 		}
 		/*
-		//m := ncgr.Image(pal)
-		fmt.Fprintln(os.Stderr, x, y, w, h)
-		mm := m.SubImage(image.Rect(x, y, x+w, y+h)).(*image.Paletted)
-		mm.Rect = mm.Rect.Sub(image.Pt(x, y))
-		return mm
+			//m := ncgr.Image(pal)
+			fmt.Fprintln(os.Stderr, x, y, w, h)
+			mm := m.SubImage(image.Rect(x, y, x+w, y+h)).(*image.Paletted)
+			mm.Rect = mm.Rect.Sub(image.Pt(x, y))
+			return mm
 		*/
 	}
 }

@@ -121,7 +121,7 @@ func (ncer *NCER) Cell(i int, ncgr *NCGR, pal color.Palette) *image.Paletted {
 	return m
 }
 
-type under struct { m image.Image }
+type under struct{ m image.Image }
 
 func (u under) Bounds() image.Rectangle { return u.m.Bounds() }
 func (u under) ColorModel() color.Model { return u.m.ColorModel() }
