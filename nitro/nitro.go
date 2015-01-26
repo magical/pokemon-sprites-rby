@@ -22,10 +22,15 @@ const (
 	seekCur = 1
 )
 
+/* TODO: Decide which prefix to use in errors, "nitro:" or e.g. "NCER:" */
+
 var (
-	errBadMagic     = errors.New("bad magic")
-	errInvalidChunk = errors.New("invalid chunk")
+	errBadMagic     = errors.New("nitro: bad magic")
+	errHeader       = errors.New("nitro: invalid header")
+	errInvalidChunk = errors.New("nitro: invalid chunk")
 )
+
+var le = binary.LittleEndian
 
 func readNitroHeader(r io.Reader, magic string, header *Header) error {
 	err := binary.Read(r, binary.LittleEndian, header)
@@ -34,6 +39,9 @@ func readNitroHeader(r io.Reader, magic string, header *Header) error {
 	}
 	if string(header.Magic[:]) != magic {
 		return errBadMagic
+	}
+	if header.HeaderSize != 16 {
+		return errHeader
 	}
 	return nil
 }
@@ -46,6 +54,9 @@ func readChunk(r io.Reader, magic string, header interface{}) (io.Reader, error)
 	err := binary.Read(r, binary.LittleEndian, &chunk)
 	if err != nil {
 		return nil, err
+	}
+	if string(chunk.Magic[:]) != magic {
+		return nil, errInvalidChunk
 	}
 	r = io.LimitReader(r, int64(chunk.Size)-8)
 	if header != nil {

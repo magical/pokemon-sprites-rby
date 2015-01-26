@@ -1,9 +1,12 @@
 package nitro
 
 import (
-	"io"
+	"errors"
+	//"fmt"
 	"image"
 	"image/color"
+	"io"
+	//"os"
 )
 
 // An NCGR (nitro character graphic resource) stores pixel data.
@@ -11,6 +14,8 @@ type NCGR struct {
 	header Header
 	char   _CHAR
 	Data   []byte
+
+	pix []byte // unpacked pixel cache
 }
 
 type _CHAR struct {
@@ -37,11 +42,15 @@ func ReadNCGR(r io.Reader) (*NCGR, error) {
 	if err != nil {
 		return nil, err
 	}
+	if ncgr.char.DataOffset != 0x18 {
+		return nil, errors.New("NCGR: invalid data offset")
+	}
 	ncgr.Data = make([]byte, ncgr.char.DataSize)
-	_, err = chunk.Read(ncgr.Data)
+	n, err := chunk.Read(ncgr.Data)
 	if err != nil {
 		return nil, err
 	}
+	ncgr.Data = ncgr.Data[:n]
 	return ncgr, nil
 }
 
@@ -92,8 +101,11 @@ func (ncgr *NCGR) Bounds() image.Rectangle {
 	return image.Rect(0, 0, w, h)
 }
 
-// Pixels returns a copy of the pixels
+// Pixels returns the pixel data
 func (ncgr *NCGR) Pixels() []byte {
+	if ncgr.pix != nil {
+		return ncgr.pix
+	}
 	switch ncgr.char.BitDepth {
 	case 3:
 		// 4 bits per pixel
@@ -102,12 +114,12 @@ func (ncgr *NCGR) Pixels() []byte {
 			pix[i*2+0] = b & 0xF
 			pix[i*2+1] = b >> 4
 		}
+		ncgr.pix = pix
 		return pix
 	case 4:
 		// 8 bits per pixel
-		pix := make([]byte, len(ncgr.Data))
-		copy(pix, ncgr.Data)
-		return pix
+		ncgr.pix = ncgr.Data
+		return ncgr.pix
 	default:
 		panic("unknown bit depth")
 	}
@@ -120,7 +132,7 @@ func (ncgr *NCGR) Image(pal color.Palette) *image.Paletted {
 	if len(pix) < w*h {
 		pix = append(pix, make([]byte, len(pix)-w*h)...)
 	}
-	if ncgr.char.Tiled & 0xFF == 0 {
+	if ncgr.IsTiled() {
 		pix2 := make([]uint8, len(pix))
 		untile(pix2, pix, w, h)
 		pix = pix2
@@ -132,6 +144,51 @@ func (ncgr *NCGR) Image(pal color.Palette) *image.Paletted {
 		Palette: pal,
 	}
 }
+
+func (ncgr *NCGR) TiledImage(pal color.Palette) *Tiled {
+	if !ncgr.IsTiled() {
+		return nil
+	}
+	t := &Tiled{
+		Pix:     ncgr.Pixels(),
+		Palette: pal,
+	}
+	return t
+}
+
+func (ncgr *NCGR) Tile(i, w, h int, pal color.Palette) image.Image {
+	if ncgr.IsTiled() {
+		t := ncgr.TiledImage(pal)
+		return t.Tile(i, w, h)
+	} else {
+		y := i / int(ncgr.char.Width) * 8
+		x := i % int(ncgr.char.Width) * 8
+		stride := int(ncgr.char.Width)*8
+		xmax := int(ncgr.char.Width)*8
+		ymax := int(ncgr.char.Height)*8
+		if x+w >= xmax {
+			w = xmax-x
+		}
+		if y+h >= ymax {
+			h = ymax-y
+		}
+		return &image.Paletted{
+			Pix: ncgr.Pixels()[y*stride + x:],
+			Rect: image.Rect(0, 0, w, h),
+			Stride: stride,
+			Palette: pal,
+		}
+		/*
+		//m := ncgr.Image(pal)
+		fmt.Fprintln(os.Stderr, x, y, w, h)
+		mm := m.SubImage(image.Rect(x, y, x+w, y+h)).(*image.Paletted)
+		mm.Rect = mm.Rect.Sub(image.Pt(x, y))
+		return mm
+		*/
+	}
+}
+
+func (ncgr *NCGR) IsTiled() bool { return ncgr.char.Tiled&0xFF == 0 }
 
 func untile(dst, src []uint8, w, h int) {
 	si := 0

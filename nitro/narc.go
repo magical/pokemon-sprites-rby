@@ -56,6 +56,7 @@ type ReadSeekerAt interface {
 	io.Seeker
 }
 
+// TODO: Rewrite to only need io.ReaderAt?
 func ReadNARC(r ReadSeekerAt) (*NARC, error) {
 	narc := new(NARC)
 
@@ -169,4 +170,13 @@ func (narc *NARC) OpenNCLR(n int) (*NCLR, error) {
 		return nil, err
 	}
 	return ReadNCLR(r)
+}
+
+// OpenNCER calls ReadNCER(narc.Open(n))
+func (narc *NARC) OpenNCER(n int) (*NCER, error) {
+	r, err := narc.Open(n)
+	if err != nil {
+		return nil, err
+	}
+	return ReadNCER(r)
 }
