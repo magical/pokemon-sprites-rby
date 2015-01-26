@@ -40,10 +40,9 @@ func (t *Tiled) Tile(n, width, height int) *Tiled {
 
 // PixOffset returns the index Pix that corresponds to the pixel at (x, y).
 func (t *Tiled) PixOffset(x, y int) int {
+	// TODO: try to get this under the inlining limit
 	x, y = x-t.Rect.Min.X, y-t.Rect.Min.Y
-	tx, ty := x%8, y%8
-	i := ((y-ty)*t.Stride+(x-tx))*8 + ty*8 + tx
-	return i
+	return (y/8*t.Stride+x/8)*64 + y%8*8 + x%8
 }
 
 func (t *Tiled) ColorIndexAt(x, y int) uint8 {
@@ -51,20 +50,20 @@ func (t *Tiled) ColorIndexAt(x, y int) uint8 {
 		return 0
 	}
 	i := t.PixOffset(x, y)
-	if i < 0 {
-		panic("out of bounds")
-	}
 	if i >= len(t.Pix) {
 		return 0
 	}
 	return t.Pix[i]
 }
 
-func (t *Tiled) SetColorIndexAt(x, y int, index uint8) {
+func (t *Tiled) SetColorIndex(x, y int, index uint8) {
 	if !image.Pt(x, y).In(t.Rect) {
 		return
 	}
 	i := t.PixOffset(x, y)
+	if i >= len(t.Pix) {
+		return
+	}
 	t.Pix[i] = index
 }
 
@@ -87,6 +86,9 @@ func (t *Tiled) Set(x, y int, c color.Color) {
 		return
 	}
 	i := t.PixOffset(x, y)
+	if i >= len(t.Pix) {
+		return
+	}
 	t.Pix[i] = uint8(t.Palette.Index(c))
 }
 
