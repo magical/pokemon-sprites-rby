@@ -15,10 +15,26 @@ func (obj *_OBJ) Size() uint  { return uint(obj[1] >> 14) }
 // Shapes: square, long, tall
 // Sizes: small, medium-small, medium-large, large
 
-var sizes = [][][2]int{
+var sizes = [][]image.Point {
 	{{8, 8}, {16, 16}, {32, 32}, {64, 64}},
 	{{16, 8}, {32, 8}, {32, 16}, {64, 32}},
 	{{8, 16}, {8, 32}, {16, 32}, {32, 64}},
+}
+
+// Dx returns the width of the source cell.
+func (obj *_OBJ) Dx() int {
+	if obj.Shape() == 3 {
+		return 0
+	}
+	return sizes[obj.Shape()][obj.Size()].X
+}
+
+// Dy retuns the height of the source cell.
+func (obj *_OBJ) Dy() int {
+	if obj.Shape() ==3 {
+		return 0
+	}
+	return sizes[obj.Shape()][obj.Size()].Y
 }
 
 // Bounds returns the destination rectangle.
@@ -28,11 +44,14 @@ func (obj *_OBJ) Bounds() image.Rectangle {
 		return image.ZR
 	}
 	size := obj.Size()
-	w := sizes[shape][size][0]
-	h := sizes[shape][size][1]
+	d := sizes[shape][size]
+	if obj.Double() {
+		d.X *= 2
+		d.Y *= 2
+	}
 	x := obj.X()
 	y := obj.Y()
-	return image.Rect(x, y, x+w, y+h)
+	return image.Rect(x, y, x+d.X, y+d.Y)
 }
 
 // 0 - none or flip

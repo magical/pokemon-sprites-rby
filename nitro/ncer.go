@@ -109,14 +109,12 @@ func (ncer *NCER) Cell(i int, ncgr *NCGR, pal color.Palette) *image.Paletted {
 	objs := ncer.objs[c.OBJOffset/6:][:c.OBJCount]
 	r := image.ZR
 	for _, obj := range objs {
-		r = r.Union(obj.bounds())
+		r = r.Union(obj.Bounds())
 	}
 	m := image.NewPaletted(r, pal)
-	//t := ncgr.TiledImage(pal)
 	for _, obj := range objs {
-		//tile := ncgr.Image(obj.Tile(), obj.Bounds())
 		r := obj.bounds()
-		draw.DrawMask(m, r, ncgr.Tile(obj.Tile(), r.Dx(), r.Dy(), pal), image.ZP, under{m}, r.Min, draw.Over)
+		draw.DrawMask(m, r, ncgr.Tile(obj.Tile(), obj.Dx(), obj.Dy(), pal), image.ZP, under{m}, r.Min, draw.Over)
 	}
 	return m
 }
@@ -130,10 +128,15 @@ func (u under) At(x, y int) color.Color {
 	return color.Alpha16{uint16(65535 - a)}
 }
 
+// bounds returns the bounds of an object without doubling.
 func (obj _OBJ) bounds() image.Rectangle {
-	r := obj.Bounds()
+	dx := obj.Dx()
+	dy := obj.Dy()
+	x := obj.X()
+	y := obj.Y()
 	if obj.Double() {
-		r = r.Add(r.Size().Div(2))
+		x += dx/2
+		y += dy/2
 	}
-	return r
+	return image.Rect(x, y, x+dx, y+dy)
 }

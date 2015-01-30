@@ -180,3 +180,12 @@ func (narc *NARC) OpenNCER(n int) (*NCER, error) {
 	}
 	return ReadNCER(r)
 }
+
+// OpenNANR calls ReadNANR(narc.Open(n))
+func (narc *NARC) OpenNANR(n int) (*NANR, error) {
+	r, err := narc.Open(n)
+	if err != nil {
+		return nil, err
+	}
+	return ReadNANR(r)
+}
