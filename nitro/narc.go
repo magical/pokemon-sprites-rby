@@ -189,3 +189,21 @@ func (narc *NARC) OpenNANR(n int) (*NANR, error) {
 	}
 	return ReadNANR(r)
 }
+
+// OpenNMCR calls ReadNMCR(narc.Open(n))
+func (narc *NARC) OpenNMCR(n int) (*NMCR, error) {
+	r, err := narc.Open(n)
+	if err != nil {
+		return nil, err
+	}
+	return ReadNMCR(r)
+}
+
+// OpenNMAR calls ReadNMAR(narc.Open(n))
+func (narc *NARC) OpenNMAR(n int) (*NMAR, error) {
+	r, err := narc.Open(n)
+	if err != nil {
+		return nil, err
+	}
+	return ReadNMAR(r)
+}
