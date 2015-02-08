@@ -12,7 +12,7 @@ type NANR struct {
 	h    Header
 	abnk _ABNK // see abnk.go
 
-	Acells []Acell
+	Cells []Acell
 	//Frames []Frame
 }
 
@@ -27,7 +27,7 @@ type Acell struct {
 type Frame struct {
 	Duration uint // 60 fps
 	Cell     int
-	Rotate   uint16 // angle in units of (tau/65536)
+	Rotate   uint16 // angle in units of (tau/65536) radians
 	ScaleX   int32  // in units of 1/4096
 	ScaleY   int32  // in units of 1/4096
 	X        int
@@ -42,7 +42,7 @@ func ReadNANR(r io.Reader) (*NANR, error) {
 	if nanr.h.ChunkCount != 1 && nanr.h.ChunkCount != 3 {
 		return nil, errors.New("NANR: too many chunks")
 	}
-	if err := readABNK(r, &nanr.abnk, &nanr.Acells); err != nil {
+	if err := readABNK(r, &nanr.abnk, &nanr.Cells); err != nil {
 		return nil, err
 	}
 	return nanr, nil
@@ -103,8 +103,8 @@ func readABNK(r io.Reader, abnk *_ABNK, acells *[]Acell) error {
 
 func parseFrame(typ uint16, b []byte) Frame {
 	var f Frame
-	f.ScaleX = 1<<12
-	f.ScaleY = 1<<12
+	f.ScaleX = 4096
+	f.ScaleY = 4096
 	switch typ {
 	case 0:
 		f.Cell = int(le.Uint16(b[0:]))

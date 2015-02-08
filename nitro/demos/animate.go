@@ -49,7 +49,15 @@ func main() {
 	if err != nil {
 		die("OpenNANR:", err)
 	}
-	g := nitro.NewAnimation(ncgr, nclr, ncer, nanr).Render()
+	nmcr, err := narc.OpenNMCR(base + 6)
+	if err != nil {
+		die("OpenNMCR:", err)
+	}
+	nmar, err := narc.OpenNMAR(base + 7)
+	if err != nil {
+		die("OpenNMAR:",err)
+	}
+	g := nitro.NewAnimation(ncgr, nclr, ncer, nanr, nmcr, nmar).Render()
 	//fmt.Fprintln(os.Stderr, len(g.Image))
 	if err := gif.EncodeAll(os.Stdout, g); err != nil {
 		die(err)

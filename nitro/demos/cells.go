@@ -30,7 +30,7 @@ func main() {
 	if err != nil {
 		die(err)
 	}
-	const poke = 1
+	const poke = 643
 	g, err := narc.OpenNCGR(poke*20 + 2)
 	if err != nil {
 		die("OpenNCGR:", err)

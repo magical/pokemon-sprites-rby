@@ -61,6 +61,7 @@ func (nclr *NCLR) Palette(n int) color.Palette {
 	return pal
 }
 
+// RGB15 represents a 15-bit color.Color, having five bits each of red, green, and blue.
 type RGB15 uint16
 
 func (rgb RGB15) RGBA() (r, g, b, a uint32) {
@@ -73,7 +74,7 @@ func (rgb RGB15) RGBA() (r, g, b, a uint32) {
 
 func (rgb RGB15) String() string {
 	const hex = "0123456789ABCDEF"
-	var s [7]byte
+	var s [5]byte
 	s[0] = '#'
 	s[1] = hex[rgb>>12&0xF]
 	s[2] = hex[rgb>>8&0xF]
