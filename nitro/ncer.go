@@ -5,7 +5,6 @@ import (
 	"errors"
 	"image"
 	"image/color"
-	"image/draw"
 	"io"
 )
 
@@ -116,20 +115,6 @@ func (ncer *NCER) Cell(i int, ncgr *NCGR, pal color.Palette) *image.Paletted {
 		drawUnder(m, obj.bounds(), ncgr.Tile(obj.Tile(), obj.Dx(), obj.Dy(), pal), image.ZP)
 	}
 	return m
-}
-
-func drawUnder(dst draw.Image, r image.Rectangle, src image.Image, sp image.Point) {
-	//draw.DrawMask(dst, r, src, sp, under{dst}, r.Min, draw.Over)
-	rotate(dst, r, r.Min, src, sp, 1, 1, 0)
-}
-
-type under struct{ m image.Image }
-
-func (u under) Bounds() image.Rectangle { return u.m.Bounds() }
-func (u under) ColorModel() color.Model { return color.Alpha16Model }
-func (u under) At(x, y int) color.Color {
-	_, _, _, a := u.m.At(x, y).RGBA()
-	return color.Alpha16{uint16(0xffff - a)}
 }
 
 // bounds returns the bounds of an object without doubling.
