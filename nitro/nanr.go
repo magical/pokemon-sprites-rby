@@ -25,7 +25,7 @@ type Acell struct {
 
 // A frame of an animated cell.
 type Frame struct {
-	Duration uint // 60 fps
+	Duration int // 60 fps
 	Cell     int
 	Rotate   uint16 // angle in units of (tau/65536) radians
 	ScaleX   int32  // in units of 1/4096
@@ -93,7 +93,7 @@ func readABNK(r io.Reader, abnk *_ABNK, acells *[]Acell) error {
 		framesraw := framesraw[araw.FrameOffset/8 : araw.FrameOffset/8+uint32(araw.FrameCount)]
 		for i, fraw := range framesraw {
 			f := parseFrame(araw.FrameType, framedata[fraw.DataOffset:])
-			f.Duration = uint(fraw.Duration)
+			f.Duration = int(fraw.Duration)
 			c.Frames[i] = f
 		}
 	}

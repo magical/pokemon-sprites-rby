@@ -193,19 +193,19 @@ func (a *Acell) FrameAt(t int) Frame {
 	// TODO: Handle PlayMode
 	total := 0
 	for _, f := range a.Frames {
-		if t < int(f.Duration) {
+		if t < f.Duration {
 			return f
 		}
-		t -= int(f.Duration)
-		total += int(f.Duration)
+		t -= f.Duration
+		total += f.Duration
 	}
 	t = t % total
 	for i := 0; i < 100; i++ {
 		for _, f := range a.Frames[a.LoopStart:] {
-			if t < int(f.Duration) {
+			if t < f.Duration {
 				return f
 			}
-			t -= int(f.Duration)
+			t -= f.Duration
 		}
 	}
 	panic("infinite loop")
@@ -246,7 +246,7 @@ func (a *Animation) Render() *gif.GIF {
 	t := 0
 	total := 0
 	for _, f := range a.nmar.Cells[0].Frames {
-		total += int(f.Duration)
+		total += f.Duration
 	}
 	//total = 100
 	for t < total {
