@@ -6,7 +6,7 @@ import (
 	"io"
 )
 
-// A NMCR (nitro multi cell resource) composes animated multi cells.
+// A NMCR (nitro multi cell resource) composes animated cells.
 type NMCR struct {
 	h    Header
 	mcbk _MCBK
@@ -88,4 +88,8 @@ func (nmcr *NMCR) Mcell(i int) []mobj {
 	}
 	c := nmcr.mcells[i]
 	return nmcr.mobjs[c.MobjOffset/8 : c.MobjOffset/8+uint32(c.MobjCount)]
+}
+
+func (o *mobj) PlayMode() int {
+	return int(o.Flags&0xF)
 }

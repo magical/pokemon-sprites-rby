@@ -25,6 +25,13 @@ type Animation struct {
 	pal        color.Palette
 	cells      []image.Image // cache of rendered cells
 	cellBounds []image.Rectangle //cache of cell bounds
+	state []state // state of animated cells
+}
+
+// State represents the current state of an animated cell
+type state struct {
+	frame int // index of the current frame
+	remain int // remaining time
 }
 
 func NewAnimation(
@@ -45,10 +52,6 @@ func NewAnimation(
 
 	a.pal = nclr.Palette(0)
 	a.pal[0] = setTrans(a.pal[0])
-	for i, c := range a.pal {
-		a.pal[i] = color.NRGBAModel.Convert(c)
-	}
-	fmt.Fprintln(os.Stderr, a.pal)
 
 	// Cache the cells
 	cells := make([]image.Image, ncer.Len())
@@ -68,6 +71,8 @@ func NewAnimation(
 	}
 	a.cells = cells
 	a.cellBounds = cellBounds
+
+	a.state = make([]state, len(nanr.Cells))
 
 	//a.pal[0] = setOpaque(a.pal[0])
 
@@ -114,7 +119,7 @@ type transform struct {
 // MAcell -> MFrame -> Mcell -> Mobj -> Acell -> Frame -> Cell -> OBJ
 
 func (a *Animation) renderMAcell(dst draw.Image, dp image.Point, c Acell, t int) {
-	f := c.FrameAt(t)
+	f, _ := c.FrameAt(t)
 	//dp = dp.Add(rotatePoint(f.X, f.Y, f.Rotate))
 	dp.X += f.X
 	dp.Y += f.Y
@@ -159,7 +164,7 @@ func (a *Animation) renderMcell(dst draw.Image, dp image.Point, objs []mobj, tr 
 			a.renderAcell(
 				dst,
 				dp.Add(rotatePoint(int(obj.X), int(obj.Y), -tr.Rotate)),
-				a.nanr.Cells[obj.AcellIndex],
+				int(obj.AcellIndex),
 				tr,
 				t,
 			)
@@ -167,10 +172,10 @@ func (a *Animation) renderMcell(dst draw.Image, dp image.Point, objs []mobj, tr 
 	}
 }
 
-func (a *Animation) renderAcell(dst draw.Image, dp image.Point, c Acell, tr transform, t int) {
-	f := c.FrameAt(t)
+func (a *Animation) renderAcell(dst draw.Image, dp image.Point, i int, tr transform, t int) {
+	//f, _ := a.nanr.Cells[i].FrameAt(t)
+	f := a.nanr.Cells[i].Frames[a.state[i].frame]
 	dp = dp.Add(rotatePoint(f.X, f.Y, -tr.Rotate))
-	//dp = dp.Add(image.Pt(f.X, f.Y))
 	tr.Rotate += float64(f.Rotate) / 65536
 	tr.ScaleX *= float64(f.ScaleX) / 4096
 	tr.ScaleY *= float64(f.ScaleY) / 4096
@@ -188,22 +193,42 @@ func (a *Animation) drawCell(dst draw.Image, dp image.Point, i int, tr transform
 	}
 }
 
+func (s *state) reset(a *Acell) {
+	s.frame = 0
+	s.remain = a.Frames[0].Duration
+}
+
+// Advance moves the animation state forward by t ticks.
+func (s *state) advance(a *Acell, t int) {
+	for t >= s.remain {
+		t -= s.remain
+		s.frame += 1
+		if s.frame == len(a.Frames) {
+			s.frame = 0
+		}
+		s.remain = a.Frames[s.frame].Duration
+	}
+	s.remain -= t
+}
+
 // Returns the Frame at time t.
-func (a *Acell) FrameAt(t int) Frame {
+func (a *Acell) FrameAt(t int) (Frame, int) {
 	// TODO: Handle PlayMode
 	total := 0
-	for _, f := range a.Frames {
+	for i, f := range a.Frames {
 		if t < f.Duration {
-			return f
+			return f, t
 		}
 		t -= f.Duration
-		total += f.Duration
+		if i >= a.LoopStart {
+			total += f.Duration
+		}
 	}
 	t = t % total
 	for i := 0; i < 100; i++ {
 		for _, f := range a.Frames[a.LoopStart:] {
 			if t < f.Duration {
-				return f
+				return f, t
 			}
 			t -= f.Duration
 		}
@@ -248,61 +273,36 @@ func (a *Animation) Render() *gif.GIF {
 	for _, f := range a.nmar.Cells[0].Frames {
 		total += f.Duration
 	}
+	for i := range a.state {
+		a.state[i].reset(&a.nanr.Cells[i])
+	}
 	//total = 100
 	for t < total {
 		fmt.Fprintln(os.Stderr, "time", t)
 		p := a.RenderFrame(t)
 		tt := a.nextFrame(t)
 		g.Image = append(g.Image, p)
-		//g.Delay = []int{0}
 		g.Delay = append(g.Delay, tt*100/60-t*100/60)
 		g.Disposal = append(g.Disposal, gif.DisposeBackground)
+		for i := range a.state {
+			a.state[i].advance(&a.nanr.Cells[i], tt - t)
+		}
 		t = tt
 	}
 	return g
 }
 
 func (a *Animation) nextFrame(t int) int {
-	/*
-	least := -1
-	mac := a.nmar.Cells[0]
-	mf := mac.FrameAt(t)
-	mf.Duration
-	mobjs := a.nmcr.Mcell(mf.Cell)
-	for _, mobj := range mobjs {
-		ac := a.nanr.Cells[mobj.AcellIndex]
-		f := ac.FrameAt(t)
-
-	for i, m := range  {
-		for _, 
-
+	f, tt := a.nmar.Cells[0].FrameAt(t)
+	least := f.Duration - tt
+	for _, s := range a.state {
+		if least == -1 || (s.remain > 0 && s.remain < least) {
+			least = s.remain
+		}
 	}
-	*/
-	//for i, c := range a.nmar.Cells { }
-	return t + 1
+	if least <= 0 {
+		least = 1
+		//panic("no next frame")
+	}
+	return t + least
 }
-
-/*
-func (a *Acell) remain(t int) int {
-	total := 0
-	for i, f := range a.Frames {
-		if t < int(f.Duration) {
-			return int(f.Duration) - t
-		}
-		t -= int(f.Duration)
-		if i >= a.LoopStart {
-			total += int(f.Duration)
-		}
-	}
-	t = t % total
-	for i := 0; i < 100; i++ {
-		for _, f := range a.Frames[a.LoopStart:] {
-			if t < int(f.Duration) {
-				return int(f.Duration) - t
-			}
-			t -= int(f.Duration)
-		}
-	}
-	panic("infinite loop")
-}
-*/
