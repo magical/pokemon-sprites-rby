@@ -66,24 +66,23 @@ func scale8x(m image.Image) image.Image {
 
 // Scale2x scales up an image with the scale2x algorithm.
 // TODO: Specialize for *image.Paletted and *Tiled.
-func scale2x(dst draw.Image, dp image.Point, src image.Image, r image.Rectangle) {
-	xlo, xhi := r.Min.X, r.Max.X
-	ylo, yhi := r.Min.Y, r.Max.Y
-	for dy, y := dp.Y, ylo; y < yhi; dy, y = dy+2, y+1 {
-		for dx, x := dp.X, xlo; x < xhi; dx, x = dx+2, x+1 {
+func scale2x(dst draw.Image, dp image.Point, src image.Image, rect image.Rectangle) {
+	rect = rect.Intersect(dst.Bounds())
+	for dy, y := dp.Y, rect.Min.Y; y < rect.Max.Y; dy, y = dy+2, y+1 {
+		for dx, x := dp.X, rect.Min.X; x < rect.Max.X; dx, x = dx+2, x+1 {
 			// Source pixels
 			c := src.At(x, y)
 			t, l, r, b := c, c, c, c
-			if y-1 >= ylo {
+			if y-1 >= rect.Min.Y {
 				t = src.At(x, y-1)
 			}
-			if y+1 < yhi {
+			if y+1 < rect.Max.Y {
 				b = src.At(x, y+1)
 			}
-			if x-1 >= xlo {
+			if x-1 >= rect.Min.X {
 				l = src.At(x-1, y)
 			}
-			if x+1 < xhi {
+			if x+1 < rect.Max.X {
 				r = src.At(x+1, y)
 			}
 			// Destination pixels

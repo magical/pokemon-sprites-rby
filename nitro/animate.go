@@ -13,6 +13,11 @@ import (
 )
 
 const doScale = true
+const debug = false
+const animIndex = 0
+
+var red = color.NRGBA{0xff, 0, 0, 0xff}
+var blue = color.NRGBA{0, 0, 0xff, 0xff}
 
 type Animation struct {
 	ncgr *NCGR
@@ -22,15 +27,16 @@ type Animation struct {
 	nmcr *NMCR
 	nmar *NMAR
 
-	pal        color.Palette
-	cells      []image.Image // cache of rendered cells
-	cellBounds []image.Rectangle //cache of cell bounds
-	state []state // state of animated cells
+	pal    color.Palette
+	cell   []image.Image     // cache of rendered cells
+	big    []image.Image     // cache of 8x cells
+	bounds []image.Rectangle // cache of cell bounds
+	state  []state           // state of animated cells
 }
 
 // State represents the current state of an animated cell
 type state struct {
-	frame int // index of the current frame
+	frame  int // index of the current frame
 	remain int // remaining time
 }
 
@@ -54,27 +60,26 @@ func NewAnimation(
 	a.pal[0] = setTrans(a.pal[0])
 
 	// Cache the cells
-	cells := make([]image.Image, ncer.Len())
-	cellBounds := make([]image.Rectangle, ncer.Len())
-	for i := range cells {
-		m := image.Image(ncer.Cell(i, ncgr, a.pal))
-		r := m.Bounds()
-		if doScale {
-			m = scale8x(m)
-		}
-		r.Max.X = max(abs(r.Min.X), abs(r.Max.X))
-		r.Max.Y = max(abs(r.Min.Y), abs(r.Max.Y))
-		r.Min.X = -r.Max.X
-		r.Min.Y = -r.Max.Y
-		cells[i] = m
-		cellBounds[i] = r.Canon()
+	a.cell = make([]image.Image, ncer.Len())
+	a.bounds = make([]image.Rectangle, ncer.Len())
+	if doScale {
+		a.big = make([]image.Image, ncer.Len())
 	}
-	a.cells = cells
-	a.cellBounds = cellBounds
+	for i := range a.cell {
+		m := image.Image(ncer.Cell(i, ncgr, a.pal))
+		a.cell[i] = m
+		a.bounds[i] = m.Bounds()
+		if doScale {
+			a.big[i] = scale8x(m)
+		}
+	}
 
 	a.state = make([]state, len(nanr.Cells))
 
 	//a.pal[0] = setOpaque(a.pal[0])
+	if debug {
+		a.pal = append(a.pal, color.Black, red, blue)
+	}
 
 	return a
 }
@@ -116,11 +121,12 @@ type transform struct {
 	ScaleY float64
 }
 
+var identity = transform{0, 1, 1}
+
 // MAcell -> MFrame -> Mcell -> Mobj -> Acell -> Frame -> Cell -> OBJ
 
 func (a *Animation) renderMAcell(dst draw.Image, dp image.Point, c Acell, t int) {
 	f, _ := c.FrameAt(t)
-	//dp = dp.Add(rotatePoint(f.X, f.Y, f.Rotate))
 	dp.X += f.X
 	dp.Y += f.Y
 	tr := transform{
@@ -133,11 +139,11 @@ func (a *Animation) renderMAcell(dst draw.Image, dp image.Point, c Acell, t int)
 	}
 }
 
-func rotatePoint(x, y int, r float64) image.Point {
-	if r == 0 {
+func rotatePoint(x, y int, tr transform) image.Point {
+	if tr == identity {
 		return image.Point{x, y}
 	}
-	return point{float64(x), float64(y)}.Rotate(r).Int()
+	return point{float64(x), float64(y)}.Rotate(tr).Int()
 }
 
 func (p point) Add(q point) point {
@@ -146,12 +152,12 @@ func (p point) Add(q point) point {
 	return p
 }
 
-func (p point) Rotate(deg float64) point {
-	sin := math.Sin(deg * (2*math.Pi))
-	cos := math.Cos(deg * (2*math.Pi))
-	p.X = p.X*cos + p.Y*sin
-	p.Y = p.Y*cos - p.X*sin
-	return p
+func (p point) Rotate(tr transform) point {
+	sin := math.Sin(tr.Rotate * (2 * math.Pi))
+	cos := math.Cos(tr.Rotate * (2 * math.Pi))
+	x := (p.X*cos - p.Y*sin) * tr.ScaleX
+	y := (p.Y*cos + p.X*sin) * tr.ScaleY
+	return point{x, y}
 }
 
 func (p point) Int() image.Point {
@@ -160,10 +166,14 @@ func (p point) Int() image.Point {
 
 func (a *Animation) renderMcell(dst draw.Image, dp image.Point, objs []mobj, tr transform, t int) {
 	for _, obj := range objs {
+		if debug && obj.AcellIndex != animIndex {
+			continue
+		}
 		if int(obj.AcellIndex) < len(a.nanr.Cells) {
 			a.renderAcell(
 				dst,
-				dp.Add(rotatePoint(int(obj.X), int(obj.Y), -tr.Rotate)),
+				dp,
+				image.Pt(int(obj.X), int(obj.Y)),
 				int(obj.AcellIndex),
 				tr,
 				t,
@@ -172,25 +182,64 @@ func (a *Animation) renderMcell(dst draw.Image, dp image.Point, objs []mobj, tr 
 	}
 }
 
-func (a *Animation) renderAcell(dst draw.Image, dp image.Point, i int, tr transform, t int) {
+func (a *Animation) renderAcell(dst draw.Image, dp, p image.Point, i int, tr transform, t int) {
 	//f, _ := a.nanr.Cells[i].FrameAt(t)
 	f := a.nanr.Cells[i].Frames[a.state[i].frame]
-	dp = dp.Add(rotatePoint(f.X, f.Y, -tr.Rotate))
+	dp = dp.Add(rotatePoint(f.X+p.X, f.Y+p.Y, tr))
 	tr.Rotate += float64(f.Rotate) / 65536
 	tr.ScaleX *= float64(f.ScaleX) / 4096
 	tr.ScaleY *= float64(f.ScaleY) / 4096
-	if f.Cell <= len(a.cells) {
+	if f.Cell <= len(a.cell) {
 		a.drawCell(dst, dp, f.Cell, tr)
 	}
 }
 
 func (a *Animation) drawCell(dst draw.Image, dp image.Point, i int, tr transform) {
-	if doScale {
-		rotate(dst, a.cellBounds[i].Add(dp), dp, a.cells[i], image.ZP, 8/tr.ScaleX, 8/tr.ScaleY, tr.Rotate*360)
+	r := a.bounds[i]
+	if tr == identity {
+		drawUnder(dst, r.Add(dp), a.cell[i], r.Min)
+	} else if doScale {
+		sp := image.ZP
+		cp := r.Min.Add(r.Size().Div(2))
+		if false {
+			// Instead of rotating around (0,0), rotate around the center
+			// of the image's bounds and adjust the coordinates to
+			// compensate.
+			sr := a.big[i].Bounds()
+			sp = sr.Min.Add(sr.Size().Div(2))
+			r = r.Sub(cp)
+			dp = dp.Add(rotatePoint(cp.X, cp.Y, tr))
+		} else {
+			// Just move the viewport to where the image will be
+			// after rotation.
+			r = r.Sub(cp).Add(rotatePoint(cp.X, cp.Y, tr))
+		}
+		rotate(dst, r.Add(dp), dp, a.big[i], sp, 8/tr.ScaleX, 8/tr.ScaleY, tr.Rotate)
+		if debug {
+			drawPoint(dst, cp.Add(dp), red)                           // center of image
+			drawPoint(dst, rotatePoint(cp.X, cp.Y, tr).Add(dp), blue) // center after rotation
+		}
 	} else {
-		rotate(dst, a.cellBounds[i].Add(dp), dp, a.cells[i], image.ZP, 1/tr.ScaleX, 1/tr.ScaleY, tr.Rotate*360)
-		//drawUnder(dst, a.cellBounds[i].Add(dp), a.cells[i], a.cellBounds[i].Min)
+		cp := r.Min.Add(r.Size().Div(2))
+		r = r.Sub(cp).Add(rotatePoint(cp.X, cp.Y, tr))
+		rotate(dst, r.Add(dp), dp, a.cell[i], image.ZP, 1/tr.ScaleX, 1/tr.ScaleY, tr.Rotate)
 	}
+	if debug {
+		drawBox(dst, r.Add(dp), color.Black)
+		drawPoint(dst, dp, color.Black)
+	}
+}
+
+func drawBox(dst draw.Image, r image.Rectangle, c color.Color) {
+	u := image.NewUniform(c)
+	draw.Draw(dst, image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+1), u, image.ZP, draw.Src)
+	draw.Draw(dst, image.Rect(r.Min.X, r.Min.Y, r.Min.X+1, r.Max.Y), u, image.ZP, draw.Src)
+	draw.Draw(dst, image.Rect(r.Max.X-1, r.Min.Y, r.Max.X, r.Max.Y), u, image.ZP, draw.Src)
+	draw.Draw(dst, image.Rect(r.Min.X, r.Max.Y-1, r.Max.X, r.Max.Y), u, image.ZP, draw.Src)
+}
+
+func drawPoint(dst draw.Image, p image.Point, c color.Color) {
+	draw.Draw(dst, image.Rect(p.X-1, p.Y-1, p.X+2, p.Y+2), image.NewUniform(c), image.ZP, draw.Src)
 }
 
 func (s *state) reset(a *Acell) {
@@ -242,7 +291,7 @@ func (a *Animation) RenderFrame(t int) *image.Paletted {
 	rgba := image.NewRGBA(r)
 	a.renderMAcell(rgba, image.Pt(196/2, 96), a.nmar.Cells[0], t)
 
-	p := image.NewPaletted(rgba.Bounds(), a.pal)
+	p := image.NewPaletted(r, a.pal)
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
 			p.SetColorIndex(x, y, paletteIndex(a.pal, rgba.At(x, y)))
@@ -278,14 +327,16 @@ func (a *Animation) Render() *gif.GIF {
 	}
 	//total = 100
 	for t < total {
-		fmt.Fprintln(os.Stderr, "time", t)
+		if debug {
+			fmt.Fprintln(os.Stderr, "time", t)
+		}
 		p := a.RenderFrame(t)
 		tt := a.nextFrame(t)
 		g.Image = append(g.Image, p)
 		g.Delay = append(g.Delay, tt*100/60-t*100/60)
 		g.Disposal = append(g.Disposal, gif.DisposeBackground)
 		for i := range a.state {
-			a.state[i].advance(&a.nanr.Cells[i], tt - t)
+			a.state[i].advance(&a.nanr.Cells[i], tt-t)
 		}
 		t = tt
 	}

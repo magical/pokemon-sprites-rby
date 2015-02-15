@@ -34,13 +34,12 @@ func rotate(dst draw.Image, r image.Rectangle, cp image.Point, src image.Image, 
 		}
 	}
 	//panic("wrong one")
-	sin := -math.Sin(deg * (math.Pi / 180))
-	cos := math.Cos(deg * (math.Pi / 180))
-	xlo, xhi := r.Min.X, r.Max.X
-	ylo, yhi := r.Min.Y, r.Max.Y
+	sin := -math.Sin(deg * (2*math.Pi))
+	cos := math.Cos(deg * (2*math.Pi))
 	sr := src.Bounds()
-	for y := ylo; y < yhi; y++ {
-		for x := xlo; x < xhi; x++ {
+	r = r.Intersect(dst.Bounds())
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
 			if _, _, _, a := dst.At(x, y).RGBA(); a != 0 {
 				continue
 			}
@@ -55,22 +54,16 @@ func rotate(dst draw.Image, r image.Rectangle, cp image.Point, src image.Image, 
 }
 
 func rotatePaletted(dst *image.Paletted, r image.Rectangle, cp image.Point, src *image.Paletted, sp image.Point, scaleX, scaleY, deg float64) {
-	sin := -math.Sin(deg * (math.Pi / 180))
-	cos := math.Cos(deg * (math.Pi / 180))
+	sin := -math.Sin(deg * (2*math.Pi))
+	cos := math.Cos(deg * (2*math.Pi))
 	sr := src.Bounds()
-	xoff := 0
-	yoff := 0
-	if scaleX != 1 && scaleY != 1 {
-		xoff = 4
-		yoff = 4
-	}
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
 			if dst.ColorIndexAt(x, y) != 0 {
 				continue
 			}
-			sx := sp.X + int((float64(x-cp.X)*cos-float64(y-cp.Y)*sin)*scaleX) + xoff
-			sy := sp.Y + int((float64(x-cp.X)*sin+float64(y-cp.Y)*cos)*scaleY) + yoff
+			sx := sp.X + int((float64(x-cp.X)*cos-float64(y-cp.Y)*sin)*scaleX)
+			sy := sp.Y + int((float64(x-cp.X)*sin+float64(y-cp.Y)*cos)*scaleY)
 			if !image.Pt(sx, sy).In(sr) {
 				continue
 			}
