@@ -44,8 +44,8 @@ func scale8x(m image.Image) image.Image {
 	r.Max = r.Max.Mul(8)
 	var dst draw.Image
 	switch m := m.(type) {
-	//case *image.Paletted:
-	//	dst = image.NewPaletted(r, m.Palette)
+	case *image.Paletted:
+		dst = image.NewPaletted(r, m.Palette)
 	default:
 		_ = m
 		dst = image.NewNRGBA(r)
@@ -65,25 +65,32 @@ func scale8x(m image.Image) image.Image {
 }
 
 // Scale2x scales up an image with the scale2x algorithm.
-// TODO: Specialize for *image.Paletted and *Tiled.
 func scale2x(dst draw.Image, dp image.Point, src image.Image, rect image.Rectangle) {
-	rect = rect.Intersect(dst.Bounds())
-	for dy, y := dp.Y, rect.Min.Y; y < rect.Max.Y; dy, y = dy+2, y+1 {
-		for dx, x := dp.X, rect.Min.X; x < rect.Max.X; dx, x = dx+2, x+1 {
+	if dst, ok := dst.(*image.Paletted); ok {
+		if src, ok := src.(*image.Paletted); ok {
+			if samePalette(dst.Palette, src.Palette) {
+				scale2xPaletted(dst, dp, src, rect)
+				return
+			}
+		}
+	}
+	rect = rect.Intersect(dst.Bounds()) // BUG: doesn't adjust dp
+	for dy, sy := dp.Y, rect.Min.Y; sy < rect.Max.Y; dy, sy = dy+2, sy+1 {
+		for dx, sx := dp.X, rect.Min.X; sx < rect.Max.X; dx, sx = dx+2, sx+1 {
 			// Source pixels
-			c := src.At(x, y)
+			c := src.At(sx, sy)
 			t, l, r, b := c, c, c, c
-			if y-1 >= rect.Min.Y {
-				t = src.At(x, y-1)
+			if sy-1 >= rect.Min.Y {
+				t = src.At(sx, sy-1)
 			}
-			if y+1 < rect.Max.Y {
-				b = src.At(x, y+1)
+			if sy+1 < rect.Max.Y {
+				b = src.At(sx, sy+1)
 			}
-			if x-1 >= rect.Min.X {
-				l = src.At(x-1, y)
+			if sx-1 >= rect.Min.X {
+				l = src.At(sx-1, sy)
 			}
-			if x+1 < rect.Max.X {
-				r = src.At(x+1, y)
+			if sx+1 < rect.Max.X {
+				r = src.At(sx+1, sy)
 			}
 			// Destination pixels
 			tl, tr, bl, br := c, c, c, c
@@ -105,6 +112,49 @@ func scale2x(dst draw.Image, dp image.Point, src image.Image, rect image.Rectang
 			dst.Set(dx+1, dy+0, tr)
 			dst.Set(dx+0, dy+1, bl)
 			dst.Set(dx+1, dy+1, br)
+		}
+	}
+}
+
+func scale2xPaletted(dst *image.Paletted, dp image.Point, src *image.Paletted, rect image.Rectangle) {
+	rect = rect.Intersect(dst.Bounds())
+	for dy, sy := dp.Y, rect.Min.Y; sy < rect.Max.Y; dy, sy = dy+2, sy+1 {
+		for dx, sx := dp.X, rect.Min.X; sx < rect.Max.X; dx, sx = dx+2, sx+1 {
+			// Source pixels
+			c := src.ColorIndexAt(sx, sy)
+			t, l, r, b := c, c, c, c
+			if sy-1 >= rect.Min.Y {
+				t = src.ColorIndexAt(sx, sy-1)
+			}
+			if sy+1 < rect.Max.Y {
+				b = src.ColorIndexAt(sx, sy+1)
+			}
+			if sx-1 >= rect.Min.X {
+				l = src.ColorIndexAt(sx-1, sy)
+			}
+			if sx+1 < rect.Max.X {
+				r = src.ColorIndexAt(sx+1, sy)
+			}
+			// Destination pixels
+			tl, tr, bl, br := c, c, c, c
+			if t != b && l != r {
+				if t == l {
+					tl = t
+				}
+				if t == r {
+					tr = t
+				}
+				if b == l {
+					bl = b
+				}
+				if b == r {
+					br = b
+				}
+			}
+			dst.SetColorIndex(dx+0, dy+0, tl)
+			dst.SetColorIndex(dx+1, dy+0, tr)
+			dst.SetColorIndex(dx+0, dy+1, bl)
+			dst.SetColorIndex(dx+1, dy+1, br)
 		}
 	}
 }
