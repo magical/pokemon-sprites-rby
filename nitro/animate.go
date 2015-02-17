@@ -13,6 +13,7 @@ import (
 )
 
 const doScale = true
+const usePaletted = true
 const debug = false
 const animIndex = 0
 
@@ -76,7 +77,6 @@ func NewAnimation(
 
 	a.state = make([]state, len(nanr.Cells))
 
-	//a.pal[0] = setOpaque(a.pal[0])
 	if debug {
 		a.pal = append(a.pal, color.Black, red, blue)
 	}
@@ -288,15 +288,19 @@ func (a *Acell) FrameAt(t int) (Frame, int) {
 // Render renders a single frame.
 func (a *Animation) RenderFrame(t int) *image.Paletted {
 	r := image.Rect(0, 0, 192, 96)
-	rgba := image.NewRGBA(r)
-	a.renderMAcell(rgba, image.Pt(196/2, 96), a.nmar.Cells[0], t)
-
 	p := image.NewPaletted(r, a.pal)
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		for x := r.Min.X; x < r.Max.X; x++ {
-			p.SetColorIndex(x, y, paletteIndex(a.pal, rgba.At(x, y)))
+	if usePaletted {
+		a.renderMAcell(p, image.Pt(196/2, 96), a.nmar.Cells[0], t)
+	} else {
+		rgba := image.NewRGBA(r)
+		a.renderMAcell(rgba, image.Pt(196/2, 96), a.nmar.Cells[0], t)
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			for x := r.Min.X; x < r.Max.X; x++ {
+				p.SetColorIndex(x, y, paletteIndex(a.pal, rgba.At(x, y)))
+			}
 		}
 	}
+
 	return p
 }
 
