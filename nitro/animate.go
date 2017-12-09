@@ -233,6 +233,9 @@ func (s *state) advance(a *Acell, t int) {
 // Returns the Frame at time t.
 func (a *Acell) FrameAt(t int) (Frame, int) {
 	// TODO: Handle PlayMode
+	if a.PlayMode != 2 {
+		panic(fmt.Sprintf("Playmode == %v", a.PlayMode))
+	}
 	total := 0
 	for i, f := range a.Frames {
 		if t < f.Duration {
