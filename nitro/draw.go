@@ -103,8 +103,8 @@ func rotate(dst draw.Image, r image.Rectangle, dp image.Point, src image.Image, 
 			return
 		}
 	}
-	sin := -math.Sin(deg * (2 * math.Pi))
-	cos := math.Cos(deg * (2 * math.Pi))
+	sin := -round(math.Sin(deg * (2 * math.Pi)))
+	cos := round(math.Cos(deg * (2 * math.Pi)))
 	sr := src.Bounds()
 	r = r.Intersect(dst.Bounds())
 	for y := r.Min.Y; y < r.Max.Y; y++ {
@@ -123,8 +123,8 @@ func rotate(dst draw.Image, r image.Rectangle, dp image.Point, src image.Image, 
 }
 
 func rotatePaletted(dst *image.Paletted, r image.Rectangle, dp image.Point, src *image.Paletted, sp image.Point, scaleX, scaleY, deg float64) {
-	sin := -math.Sin(deg * (2 * math.Pi))
-	cos := math.Cos(deg * (2 * math.Pi))
+	sin := -round(math.Sin(deg * (2 * math.Pi)))
+	cos := round(math.Cos(deg * (2 * math.Pi)))
 	sr := src.Bounds()
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
@@ -144,4 +144,8 @@ func rotatePaletted(dst *image.Paletted, r image.Rectangle, dp image.Point, src 
 			dst.SetColorIndex(x, y, si)
 		}
 	}
+}
+
+func round(x float64) float64 {
+	return math.Trunc(x*4096 + 0.5)/4096
 }
