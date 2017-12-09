@@ -133,7 +133,7 @@ func decodeTiles(r io.ByteReader, sizehint int) ([]byte, error) {
 			}
 		case 5:
 			for i := 0; i < num; i++ {
-				data = append(data, reverseBits(data[seek+i]))
+				data = append(data, reverse(data[seek+i]))
 			}
 		case 6:
 			if num-1 > seek {
@@ -171,8 +171,11 @@ func untile(m *image.Paletted, data []byte) {
 	}
 }
 
-func reverseBits(b byte) byte {
-	return byte(uint64(b) * 0x0202020202 & 0x010884422010 % 1023)
+func reverse(b byte) byte {
+	b = b>>4&0x0F | b&0x0F<<4
+	b = b>>2&0x33 | b&0x33<<2
+	b = b>>1&0x55 | b&0x55<<1
+	return b
 }
 
 func mingle(x, y uint16) uint16 {
