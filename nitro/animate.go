@@ -14,8 +14,9 @@ import (
 
 const doScale = true
 const usePaletted = true
+
 const debug = false
-const animIndex = 0
+const animIndex = 15
 
 var red = color.NRGBA{0xff, 0, 0, 0xff}
 var blue = color.NRGBA{0, 0, 0xff, 0xff}
@@ -155,6 +156,7 @@ func (a *Animation) renderMcell(dst draw.Image, dp image.Point, objs []mobj, tr 
 func (a *Animation) renderAcell(dst draw.Image, dp, p image.Point, i int, tr transform, t int) {
 	//f, _ := a.nanr.Cells[i].FrameAt(t)
 	f := a.nanr.Cells[i].Frames[a.state[i].frame]
+	//dp = dp.Add(rotatePoint(f.X+p.X, f.Y+p.Y, tr))
 	dp = dp.Add(rotatePoint(f.X+p.X, f.Y+p.Y, tr))
 	tr.Rotate += float64(f.Rotate) / 65536
 	tr.ScaleX *= float64(f.ScaleX) / 4096
@@ -185,9 +187,10 @@ func (a *Animation) drawCell(dst draw.Image, dp image.Point, i int, tr transform
 			r = r.Sub(cp).Add(rotatePoint(cp.X, cp.Y, tr))
 		}
 		rotate(dst, r.Add(dp), dp, a.big[i], sp, 8/tr.ScaleX, 8/tr.ScaleY, tr.Rotate)
+		//rotate(dst, double(r.Add(dp)), dp.Mul(2), a.big[i], sp, 4/tr.ScaleX, 4/tr.ScaleY, tr.Rotate)
 		if debug {
-			drawPoint(dst, cp.Add(dp), red)                           // center of image
-			drawPoint(dst, rotatePoint(cp.X, cp.Y, tr).Add(dp), blue) // center after rotation
+			//drawPoint(dst, cp.Add(dp), red)                           // center of image
+			//drawPoint(dst, rotatePoint(cp.X, cp.Y, tr).Add(dp), blue) // center after rotation
 		}
 	} else {
 		cp := r.Min.Add(r.Size().Div(2))
@@ -198,6 +201,12 @@ func (a *Animation) drawCell(dst draw.Image, dp image.Point, i int, tr transform
 		drawBox(dst, r.Add(dp), color.Black)
 		drawPoint(dst, dp, color.Black)
 	}
+}
+
+func double(r image.Rectangle) image.Rectangle{
+	r.Min = r.Min.Mul(2)
+	r.Max = r.Max.Mul(2)
+	return r
 }
 
 func drawBox(dst draw.Image, r image.Rectangle, c color.Color) {
