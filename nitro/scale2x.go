@@ -47,7 +47,6 @@ func scale8x(m image.Image) image.Image {
 	case *image.Paletted:
 		dst = image.NewPaletted(r, m.Palette)
 	default:
-		_ = m
 		dst = image.NewNRGBA(r)
 	}
 	// Perform scale2x thrice in-place
@@ -74,7 +73,9 @@ func scale2x(dst draw.Image, dp image.Point, src image.Image, rect image.Rectang
 			}
 		}
 	}
-	rect = rect.Intersect(dst.Bounds()) // BUG: doesn't adjust dp
+	sp := rect.Min
+	rect = rect.Intersect(src.Bounds())
+	dp = dp.Add(rect.Min.Sub(sp).Mul(2)) // adjust dp if rect changed
 	for dy, sy := dp.Y, rect.Min.Y; sy < rect.Max.Y; dy, sy = dy+2, sy+1 {
 		for dx, sx := dp.X, rect.Min.X; sx < rect.Max.X; dx, sx = dx+2, sx+1 {
 			// Source pixels
@@ -117,7 +118,9 @@ func scale2x(dst draw.Image, dp image.Point, src image.Image, rect image.Rectang
 }
 
 func scale2xPaletted(dst *image.Paletted, dp image.Point, src *image.Paletted, rect image.Rectangle) {
-	rect = rect.Intersect(dst.Bounds())
+	sp := rect.Min
+	rect = rect.Intersect(src.Bounds())
+	dp = dp.Add(rect.Min.Sub(sp).Mul(2)) // adjust dp if rect changed
 	for dy, sy := dp.Y, rect.Min.Y; sy < rect.Max.Y; dy, sy = dy+2, sy+1 {
 		for dx, sx := dp.X, rect.Min.X; sx < rect.Max.X; dx, sx = dx+2, sx+1 {
 			// Source pixels

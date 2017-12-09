@@ -58,7 +58,12 @@ func NewAnimation(
 	a.nmar = nmar
 
 	a.pal = nclr.Palette(0)
-	a.pal[0] = setTrans(a.pal[0])
+	if !usePaletted {
+		a.pal[0] = setTrans(a.pal[0])
+	}
+	if debug {
+		a.pal = append(a.pal, color.Black, red, blue)
+	}
 
 	// Cache the cells
 	a.cell = make([]image.Image, ncer.Len())
@@ -76,10 +81,6 @@ func NewAnimation(
 	}
 
 	a.state = make([]state, len(nanr.Cells))
-
-	if debug {
-		a.pal = append(a.pal, color.Black, red, blue)
-	}
 
 	return a
 }
@@ -141,32 +142,20 @@ func (a *Animation) renderMAcell(dst draw.Image, dp image.Point, c Acell, t int)
 
 func rotatePoint(x, y int, tr transform) image.Point {
 	if tr == identity {
-		return image.Point{x, y}
+		return image.Pt(x, y)
 	}
-	return point{float64(x), float64(y)}.Rotate(tr).Int()
-}
-
-func (p point) Add(q point) point {
-	p.X += q.X
-	p.Y += q.Y
-	return p
-}
-
-func (p point) Rotate(tr transform) point {
 	sin := math.Sin(tr.Rotate * (2 * math.Pi))
 	cos := math.Cos(tr.Rotate * (2 * math.Pi))
-	x := (p.X*cos - p.Y*sin) * tr.ScaleX
-	y := (p.Y*cos + p.X*sin) * tr.ScaleY
-	return point{x, y}
-}
-
-func (p point) Int() image.Point {
-	return image.Pt(int(p.X), int(p.Y))
+	x0 := float64(x)*tr.ScaleX
+	y0 := float64(y)*tr.ScaleY
+	x1 := x0*cos - y0*sin
+	y1 := y0*cos + x0*sin
+	return image.Pt(int(x1), int(y1))
 }
 
 func (a *Animation) renderMcell(dst draw.Image, dp image.Point, objs []mobj, tr transform, t int) {
 	for _, obj := range objs {
-		if debug && obj.AcellIndex != animIndex {
+		if debug && animIndex >= 0 && int(obj.AcellIndex) != animIndex {
 			continue
 		}
 		if int(obj.AcellIndex) < len(a.nanr.Cells) {
