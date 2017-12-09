@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"gif"
+	"image/gif"
 	"os"
 	"strconv"
 
