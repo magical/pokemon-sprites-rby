@@ -111,11 +111,6 @@ func setOpaque(c color.Color) color.Color {
 	return n
 }
 
-type point struct {
-	X float64
-	Y float64
-}
-
 type transform struct {
 	Rotate float64
 	ScaleX float64
