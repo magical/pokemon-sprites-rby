@@ -7,9 +7,8 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"image/gif"
 	"math"
-
-	"github.com/magical/gif"
 )
 
 const doScale = true
@@ -128,8 +127,8 @@ func rotatePoint(x, y int, tr transform) image.Point {
 	}
 	sin := math.Sin(tr.Rotate * (2 * math.Pi))
 	cos := math.Cos(tr.Rotate * (2 * math.Pi))
-	x0 := float64(x)*tr.ScaleX
-	y0 := float64(y)*tr.ScaleY
+	x0 := float64(x) * tr.ScaleX
+	y0 := float64(y) * tr.ScaleY
 	x1 := x0*cos - y0*sin
 	y1 := y0*cos + x0*sin
 	return image.Pt(int(x1), int(y1))
@@ -203,7 +202,7 @@ func (a *Animation) drawCell(dst draw.Image, dp image.Point, i int, tr transform
 	}
 }
 
-func double(r image.Rectangle) image.Rectangle{
+func double(r image.Rectangle) image.Rectangle {
 	r.Min = r.Min.Mul(2)
 	r.Max = r.Max.Mul(2)
 	return r
@@ -320,7 +319,7 @@ func (a *Animation) Render() *gif.GIF {
 		tt := a.nextFrame(t)
 		g.Image = append(g.Image, p)
 		g.Delay = append(g.Delay, tt*100/60-t*100/60)
-		g.Disposal = append(g.Disposal, gif.DisposeBackground)
+		g.Disposal = append(g.Disposal, gif.DisposalBackground)
 		for i := range a.state {
 			a.state[i].advance(&a.nanr.Cells[i], tt-t)
 		}
