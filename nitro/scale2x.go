@@ -8,6 +8,13 @@ import (
 	//"os"
 )
 
+// This file implements the scale2x/EPX algorithm for upscaling an image,
+// as specified on http://scale2x.sourceforge.net/algorithm.html
+// Unlike other sprite scaling algorithms (like hq2x), scale2x does no interpolation;
+// every color comes from the original image.
+// It works by replacing each pixel with a 2x2 grid of pixels,
+// with colors selected from the source pixel and its immediate neighbors.
+
 /*
 func main() {
 	m, err := png.Decode(os.Stdin)
