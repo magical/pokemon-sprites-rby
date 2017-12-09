@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/magical/gif"
+	"gif"
 	"os"
 	"strconv"
 
@@ -55,7 +55,7 @@ func main() {
 	}
 	nmar, err := narc.OpenNMAR(base + 7)
 	if err != nil {
-		die("OpenNMAR:",err)
+		die("OpenNMAR:", err)
 	}
 	g := nitro.NewAnimation(ncgr, nclr, ncer, nanr, nmcr, nmar).Render()
 	//fmt.Fprintln(os.Stderr, len(g.Image))
