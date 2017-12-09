@@ -1,11 +1,8 @@
-// +build ignore
-
 package main
 
 import (
 	"bufio"
 	"errors"
-	//"fmt"
 	"flag"
 	"image"
 	"image/color"
@@ -82,14 +79,14 @@ var info = struct {
 	BackSpriteOffset   int64
 	PaletteOffset      int64
 	ShinyPaletteOffset int64
-	NationalDexOffset int64
+	NationalDexOffset  int64
 }{
 	Code:               "AXVE",
 	SpriteOffset:       0x1E8354,
 	BackSpriteOffset:   0x1E97F4,
 	PaletteOffset:      0x1EA5B4,
 	ShinyPaletteOffset: 0x1EB374,
-	NationalDexOffset: 0x1FC516,
+	NationalDexOffset:  0x1FC516,
 }
 
 func readPointerAt(r io.ReaderAt, base int64, n int) int64 {
