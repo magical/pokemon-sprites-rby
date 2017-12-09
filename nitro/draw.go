@@ -126,6 +126,8 @@ func rotatePaletted(dst *image.Paletted, r image.Rectangle, dp image.Point, src 
 	sin := -round(math.Sin(deg * (2 * math.Pi)))
 	cos := round(math.Cos(deg * (2 * math.Pi)))
 	sr := src.Bounds()
+	r = r.Intersect(dst.Bounds())
+	//pix := dst.Pix[dst.PixOffset(r.Min.X, r.Min.Y):]
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
 			if dst.ColorIndexAt(x, y) != 0 {
