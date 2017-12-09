@@ -85,20 +85,6 @@ func NewAnimation(
 	return a
 }
 
-func abs(x int) int {
-	if x < 0 {
-		x = -x
-	}
-	return x
-}
-
-func max(x, y int) int {
-	if x > y {
-		return x
-	}
-	return y
-}
-
 func setTrans(c color.Color) color.Color {
 	n := color.NRGBAModel.Convert(c).(color.NRGBA)
 	n.A = 0
