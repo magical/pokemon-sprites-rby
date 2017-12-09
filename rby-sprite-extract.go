@@ -51,14 +51,15 @@ harder. It is easier not to mess around with tiles at all.
 
 */
 
+// BitReader is a big-endian bit reader.
 type bitReader struct {
 	r     io.ByteReader
-	bits  uint16
+	bits  uint32
 	count uint
 	err   error
 }
 
-func (br *bitReader) ReadBits(n uint) uint8 {
+func (br *bitReader) ReadBits(n uint) uint32 {
 	for br.count < n {
 		b, err := br.r.ReadByte()
 		if err == io.EOF {
@@ -69,22 +70,14 @@ func (br *bitReader) ReadBits(n uint) uint8 {
 			return 0
 		}
 		br.bits <<= 8
-		br.bits |= uint16(b)
+		br.bits |= uint32(b)
 		br.count += 8
 	}
 
 	shift := br.count - n
-	mask := uint16(1<<n - 1)
-	b := uint8((br.bits >> shift) & mask)
+	mask := uint32(1<<n - 1)
+	b := (br.bits >> shift) & mask
 	br.count -= n
-	return b
-}
-
-func (br *bitReader) ReadBits16(n uint) uint16 {
-	b := uint16(br.ReadBits(n))
-	if n > 8 {
-		b = b<<8 | uint16(br.ReadBits(n-8))
-	}
 	return b
 }
 
@@ -111,12 +104,12 @@ func Decode(reader io.Reader) (*image.Paletted, error) {
 		s0, s1 = s1, s0
 	}
 
-	readData(r, s0, width, height)
+	readPixels(r, s0, width, height)
 	mode := r.ReadBits(1)
 	if mode == 1 {
 		mode = 1 + r.ReadBits(1)
 	}
-	readData(r, s1, width, height)
+	readPixels(r, s1, width, height)
 
 	if r.Err() != nil {
 		return nil, r.Err()
@@ -149,57 +142,41 @@ func Decode(reader io.Reader) (*image.Paletted, error) {
 	return m, nil
 }
 
-// ReadData reads, expands, and deinterleaves compressed pixel data.
-func readData(r *bitReader, b []uint8, width, height int) {
-	c := make(chan uint8)
-	go func() {
-		n := 0
-		z := uint16(0)
-		if r.ReadBits(1) == 0 {
-			z = readUint16(r)
-		}
-		for n < len(b)*4 {
-			if z > 0 {
-				c <- uint8(0)
-				z--
-				n++
-				continue
-			}
-
-			px := r.ReadBits(2)
-			if px != 0 {
-				c <- px
-				n++
-			} else {
-				z = readUint16(r)
-			}
-		}
-		if n > len(b)*4 {
-			// TODO better error handling
-			log.Panicf("read too much data: %v vs %v", n, len(b)*4)
-		}
-	}()
-
+// ReadPixels reads, expands, and deinterleaves compressed pixel data.
+func readPixels(r *bitReader, b []uint8, width, height int) {
+	var z uint16
+	if r.ReadBits(1) == 0 {
+		z = decode16(r)
+	}
 	for x := 0; x < width; x++ {
-		for shift := uint(8); shift > 0; {
-			shift -= 2
+		for shift := 6; shift >= 0; shift -= 2 {
 			for y := 0; y < height*8; y++ {
+			loop:
+				var bits uint8
+				if z > 0 {
+					bits = 0
+					z--
+				} else {
+					bits = uint8(r.ReadBits(2))
+					if bits == 0 {
+						z = decode16(r)
+						goto loop
+					}
+				}
 				i := y*width + x
-				b[i] |= <-c << shift
+				b[i] |= bits << uint(shift)
 			}
 		}
 	}
 }
 
-// ReadUint16 reads a compressed 16-bit integer.
-func readUint16(r *bitReader) (n uint16) {
-	e := uint(1)
+// Decode16 reads a compressed 16-bit integer.
+func decode16(r *bitReader) uint16 {
+	var n uint = 1
 	for r.ReadBits(1) == 1 {
-		e += 1
+		n += 1
 	}
-
-	n = uint16(uint(1)<<e-1) + r.ReadBits16(e)
-	return n
+	return uint16(1<<n + r.ReadBits(n) - 1)
 }
 
 var invXorShift [256]uint8
