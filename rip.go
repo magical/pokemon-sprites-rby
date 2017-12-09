@@ -17,7 +17,7 @@ import (
 	"strconv"
 
 	"github.com/magical/png"
-	"github.com/magical/sprites"
+	"github.com/magical/sprites/gb"
 )
 
 var (
@@ -69,7 +69,7 @@ func ripSingle() error {
 	}
 	defer f.Close()
 
-	rip, err := sprites.NewRipper(f)
+	rip, err := gb.NewRipper(f)
 	if err != nil {
 		return err
 	}
@@ -159,14 +159,14 @@ func ripBatchFilename(filename string) error {
 		return err
 	}
 	defer f.Close()
-	rip, err := sprites.NewRipper(f)
+	rip, err := gb.NewRipper(f)
 	if err != nil {
 		return err
 	}
 	version := rip.Version()
 	outdir := filepath.Join(outname, version)
 	var things = []struct {
-		fn      func(rip *sprites.Ripper, n int, form string, outname string) error
+		fn      func(rip *gb.Ripper, n int, form string, outname string) error
 		dirname string
 		ext     string
 		enabled bool
@@ -186,7 +186,7 @@ func ripBatchFilename(filename string) error {
 			}
 		}
 	}
-	for n := 1; n <= sprites.MaxPokemon; n++ {
+	for n := 1; n <= gb.MaxPokemon; n++ {
 		for _, t := range things {
 			if !t.enabled {
 				continue
@@ -198,7 +198,7 @@ func ripBatchFilename(filename string) error {
 			}
 		}
 	}
-	for _, form := range sprites.UnownForms {
+	for _, form := range gb.UnownForms {
 		for _, t := range things {
 			if !t.enabled {
 				continue
@@ -211,7 +211,7 @@ func ripBatchFilename(filename string) error {
 		}
 	}
 	os.MkdirAll(filepath.Join(outdir, "trainers"), 0777)
-	for n := 1; n <= sprites.MaxTrainer; n++ {
+	for n := 1; n <= gb.MaxTrainer; n++ {
 		name := filepath.Join("trainers", strconv.Itoa(n))
 		m, err := rip.Trainer(n)
 		if err != nil {
@@ -226,7 +226,7 @@ func ripBatchFilename(filename string) error {
 	return nil
 }
 
-func ripAnimation(rip *sprites.Ripper, number int, form string, outname string) error {
+func ripAnimation(rip *gb.Ripper, number int, form string, outname string) error {
 	var g *gif.GIF
 	var err error
 	if number == 201 && form != "" {
@@ -240,7 +240,7 @@ func ripAnimation(rip *sprites.Ripper, number int, form string, outname string) 
 	return write(g, outname)
 }
 
-func ripPokemon(rip *sprites.Ripper, number int, form string, outname string) error {
+func ripPokemon(rip *gb.Ripper, number int, form string, outname string) error {
 	var m *image.Paletted
 	var err error
 	if number == 201 && form != "" {
@@ -254,7 +254,7 @@ func ripPokemon(rip *sprites.Ripper, number int, form string, outname string) er
 	return write(m, outname)
 }
 
-func ripPokemonBack(rip *sprites.Ripper, number int, form string, outname string) error {
+func ripPokemonBack(rip *gb.Ripper, number int, form string, outname string) error {
 	var m *image.Paletted
 	var err error
 	if number == 201 && form != "" {
@@ -271,7 +271,7 @@ func ripPokemonBack(rip *sprites.Ripper, number int, form string, outname string
 // TODO: It would be nice to just do a palette
 //       swap instead of re-ripping the images.
 
-func ripShinyPokemon(rip *sprites.Ripper, number int, form string, outname string) error {
+func ripShinyPokemon(rip *gb.Ripper, number int, form string, outname string) error {
 	var m *image.Paletted
 	var err error
 	if number == 201 && form != "" {
@@ -289,7 +289,7 @@ func ripShinyPokemon(rip *sprites.Ripper, number int, form string, outname strin
 	return write(m, outname)
 }
 
-func ripShinyPokemonBack(rip *sprites.Ripper, number int, form string, outname string) error {
+func ripShinyPokemonBack(rip *gb.Ripper, number int, form string, outname string) error {
 	var m *image.Paletted
 	var err error
 	if number == 201 && form != "" {
@@ -307,7 +307,7 @@ func ripShinyPokemonBack(rip *sprites.Ripper, number int, form string, outname s
 	return write(m, outname)
 }
 
-func ripShinyAnimation(rip *sprites.Ripper, number int, form string, outname string) error {
+func ripShinyAnimation(rip *gb.Ripper, number int, form string, outname string) error {
 	var g *gif.GIF
 	var err error
 	if number == 201 && form != "" {
