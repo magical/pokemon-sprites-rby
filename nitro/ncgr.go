@@ -172,6 +172,9 @@ func (ncgr *NCGR) Tile(i, w, h int, pal color.Palette) image.Image {
 		if y+h >= ymax {
 			h = ymax - y
 		}
+		if w <= 0 || h <= 0 {
+			return &image.Paletted{ Palette: pal }
+		}
 		return &image.Paletted{
 			Pix:     ncgr.Pixels()[y*stride+x:],
 			Rect:    image.Rect(0, 0, w, h),
