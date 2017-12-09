@@ -373,7 +373,7 @@ func newRipper(f *os.File) (*Ripper, error) {
 	paletteMap := rom[pos+1 : pos+152]
 	copy(rip.spritePalette[:], paletteMap)
 
-	var palettes [40][4]colorRGB15
+	var palettes [40][4]RGB15
 	r := bytes.NewReader(rom[pos+152:])
 	err = binary.Read(r, binary.LittleEndian, &palettes)
 	if err != nil {
@@ -382,7 +382,7 @@ func newRipper(f *os.File) (*Ripper, error) {
 	for _, p := range palettes {
 		var cp [4]color.Color
 		for i, c := range p {
-			cp[i] = color.Color(c.NRGBA())
+			cp[i] = c
 		}
 		rip.sgbPalettes = append(rip.sgbPalettes, cp[:])
 	}
@@ -394,7 +394,7 @@ func newRipper(f *os.File) (*Ripper, error) {
 		for _, p := range palettes {
 			var cp [4]color.Color
 			for i, c := range p {
-				cp[i] = color.Color(c.NRGBA())
+				cp[i] = c
 			}
 			rip.cgbPalettes = append(rip.cgbPalettes, cp[:])
 		}
@@ -403,19 +403,14 @@ func newRipper(f *os.File) (*Ripper, error) {
 	return rip, nil
 }
 
-type colorRGB15 uint16
+type RGB15 uint16
 
-func (rgb colorRGB15) NRGBA() color.NRGBA {
-	return color.NRGBA{
-		uint8(((rgb>>0&31)*255 + 15) / 31),
-		uint8(((rgb>>5&31)*255 + 15) / 31),
-		uint8(((rgb>>10&31)*255 + 15) / 31),
-		255,
-	}
-}
-
-func (rgb colorRGB15) RGBA() (r, g, b, a uint32) {
-	return rgb.NRGBA().RGBA()
+func (rgb RGB15) RGBA() (r, g, b, a uint32) {
+	r = (uint32(rgb>>0&31)*0xFFFF + 15) / 31
+	g = (uint32(rgb>>5&31)*0xFFFF + 15) / 31
+	b = (uint32(rgb>>10&31)*0xFFFF + 15) / 31
+	a = 0xFFFF
+	return
 }
 
 func (rip *Ripper) Pokemon(n int) (*image.Paletted, error) {
@@ -556,7 +551,7 @@ func getValue(min, max int, v uint8) int {
 // http://sourceforge.net/p/vbam/code/1226/tree/trunk/src/gb/GB.cpp#l585
 func muteColors(p color.Palette) {
 	for i := range p {
-		c := p[i].(color.NRGBA)
+		c := color.NRGBAModel.Convert(p[i]).(color.NRGBA)
 		r := getValue(
 			getValue(33, 115, c.G),
 			getValue(198, 239, c.G),
@@ -579,7 +574,7 @@ func muteColors(p color.Palette) {
 // https://code.google.com/p/gnuboy/source/browse/trunk/lcd.c?r=199#722
 func muteColors2(p color.Palette) {
 	for i := range p {
-		c := p[i].(color.NRGBA)
+		c := color.NRGBAModel.Convert(p[i]).(color.NRGBA)
 		r, g, b := uint16(c.R), uint16(c.G), uint16(c.B)
 		rr := (r*195+g*25+b*0)>>8 + 35
 		gg := (r*25+g*170+b*25)>>8 + 35
@@ -590,7 +585,7 @@ func muteColors2(p color.Palette) {
 
 func muteColors3(p color.Palette) {
 	for i := range p {
-		c := p[i].(color.NRGBA)
+		c := color.NRGBAModel.Convert(p[i]).(color.NRGBA)
 		r, g, b := uint16(c.R)>>3, uint16(c.G)>>3, uint16(c.B)>>3
 		rr := (r*13 + g*2 + b) / 2
 		gg := (r*0 + g*12 + b*4) / 2
@@ -601,7 +596,7 @@ func muteColors3(p color.Palette) {
 
 func muteColors4(p color.Palette) {
 	for i := range p {
-		c := p[i].(color.NRGBA)
+		c := color.NRGBAModel.Convert(p[i]).(color.NRGBA)
 		rr := c.R/2 + 82
 		gg := c.G/2 + 82
 		bb := c.B/2 + 82
