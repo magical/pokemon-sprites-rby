@@ -94,7 +94,7 @@ func (br *bitReader) Err() error {
 
 // Decode reads a compressed pokemon image and returns it as an
 // image.Paletted.
-func Decode(reader io.Reader) (image.Image, error) {
+func Decode(reader io.Reader) (*image.Paletted, error) {
 	r := &bitReader{r: bufio.NewReader(reader)}
 
 	width := int(r.ReadBits(4))
@@ -250,7 +250,7 @@ var (
 
 var fakeGbcPalettes []color.Palette
 
-type ripper struct {
+type Ripper struct {
 	f         *os.File
 	lang      string
 	version   string
@@ -263,9 +263,9 @@ type ripper struct {
 	cgbPalettes   []color.Palette
 }
 
-func newRipper(f *os.File) (*ripper, error) {
-	z := new(ripper)
-	z.f = f
+func newRipper(f *os.File) (*Ripper, error) {
+	rip := new(Ripper)
+	rip.f = f
 
 	rom, err := ioutil.ReadAll(f)
 	if err != nil {
@@ -288,19 +288,19 @@ func newRipper(f *os.File) (*ripper, error) {
 
 	switch title {
 	case "POKEMON RED":
-		z.version = "red"
+		rip.version = "red"
 	case "POKEMON GREEN":
-		z.version = "green"
+		rip.version = "green"
 	case "POKEMON BLUE":
-		z.version = "blue"
+		rip.version = "blue"
 	case "POKEMON YELLOW":
-		z.version = "yellow"
+		rip.version = "yellow"
 	}
 
 	if isJP {
-		z.lang = "jp"
+		rip.lang = "jp"
 	} else {
-		z.lang = "en"
+		rip.lang = "en"
 	}
 
 	// Read pokedex order
@@ -345,8 +345,8 @@ func newRipper(f *os.File) (*ripper, error) {
 	for i, s := range stats {
 		bank := getBank(internalId[int(s.N)])
 		base := int64(bank-1) << 14
-		z.spritePos[i].front = base + int64(s.FrontSpritePointer)
-		z.spritePos[i].back = base + int64(s.BackSpritePointer)
+		rip.spritePos[i].front = base + int64(s.FrontSpritePointer)
+		rip.spritePos[i].back = base + int64(s.BackSpritePointer)
 	}
 
 	// Find Mew if missing
@@ -361,8 +361,8 @@ func newRipper(f *os.File) (*ripper, error) {
 		if err != nil {
 			return nil, err
 		}
-		z.spritePos[150].front = int64(s.FrontSpritePointer)
-		z.spritePos[150].back = int64(s.BackSpritePointer)
+		rip.spritePos[150].front = int64(s.FrontSpritePointer)
+		rip.spritePos[150].back = int64(s.BackSpritePointer)
 	}
 
 	// Read palettes
@@ -371,7 +371,7 @@ func newRipper(f *os.File) (*ripper, error) {
 		return nil, fmt.Errorf("Couldn't find palettes")
 	}
 	paletteMap := rom[pos+1 : pos+152]
-	copy(z.spritePalette[:], paletteMap)
+	copy(rip.spritePalette[:], paletteMap)
 
 	var palettes [40][4]colorRGB15
 	r := bytes.NewReader(rom[pos+152:])
@@ -384,7 +384,7 @@ func newRipper(f *os.File) (*ripper, error) {
 		for i, c := range p {
 			cp[i] = color.Color(c.NRGBA())
 		}
-		z.sgbPalettes = append(z.sgbPalettes, cp[:])
+		rip.sgbPalettes = append(rip.sgbPalettes, cp[:])
 	}
 	if hasCGB {
 		err = binary.Read(r, binary.LittleEndian, &palettes)
@@ -396,11 +396,11 @@ func newRipper(f *os.File) (*ripper, error) {
 			for i, c := range p {
 				cp[i] = color.Color(c.NRGBA())
 			}
-			z.cgbPalettes = append(z.cgbPalettes, cp[:])
+			rip.cgbPalettes = append(rip.cgbPalettes, cp[:])
 		}
 	}
 
-	return z, nil
+	return rip, nil
 }
 
 type colorRGB15 uint16
@@ -418,31 +418,31 @@ func (rgb colorRGB15) RGBA() (r, g, b, a uint32) {
 	return rgb.NRGBA().RGBA()
 }
 
-func (z *ripper) Sprite(n int) (image.Image, error) {
-	ptr := z.spritePos[n-1].front
-	z.f.Seek(ptr, 0)
-	return Decode(z.f)
+func (rip *Ripper) Pokemon(n int) (*image.Paletted, error) {
+	ptr := rip.spritePos[n-1].front
+	rip.f.Seek(ptr, 0)
+	return Decode(rip.f)
 }
 
-func (z *ripper) SpritePalette(n int, sys string) color.Palette {
-	pi := z.spritePalette[n-1]
+func (rip *Ripper) PokemonPalette(n int, sys string) color.Palette {
+	pi := rip.spritePalette[n-1]
 	if sys == "sgb" {
-		return z.sgbPalettes[pi]
+		return rip.sgbPalettes[pi]
 	}
 	if sys == "fakegbc" && fakeGbcPalettes != nil {
 		return fakeGbcPalettes[pi]
 	}
-	return z.cgbPalettes[pi]
+	return rip.cgbPalettes[pi]
 }
 
-func (z *ripper) CombinedPalette(sys string) (p color.Palette) {
+func (rip *Ripper) CombinedPalette(sys string) (p color.Palette) {
 	var palettes []color.Palette
 	if sys == "sgb" {
-		palettes = z.sgbPalettes[16:26]
+		palettes = rip.sgbPalettes[16:26]
 	} else if sys == "fakegbc" && fakeGbcPalettes != nil {
 		palettes = fakeGbcPalettes[16:26]
 	} else {
-		palettes = z.cgbPalettes[16:26]
+		palettes = rip.cgbPalettes[16:26]
 	}
 	p = append(p, palettes[0][0])
 	for _, sp := range palettes {
@@ -616,12 +616,12 @@ func main() {
 		if err != nil {
 			continue
 		}
-		z, err := newRipper(f)
+		rip, err := newRipper(f)
 		if err != nil {
 			continue
 		}
-		if z.cgbPalettes != nil {
-			fakeGbcPalettes = z.cgbPalettes
+		if rip.cgbPalettes != nil {
+			fakeGbcPalettes = rip.cgbPalettes
 			break
 		}
 	}
@@ -632,7 +632,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		z, err := newRipper(f)
+		rip, err := newRipper(f)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -640,8 +640,8 @@ func main() {
 		path := "out"
 		os.MkdirAll(path, 0777)
 		var gbcPalette color.Palette
-		if z.cgbPalettes == nil {
-			switch z.version {
+		if rip.cgbPalettes == nil {
+			switch rip.version {
 			case "red":
 				gbcPalette = gbPokemonRedPalette
 			case "green":
@@ -662,40 +662,39 @@ func main() {
 			{"fakegbc", nil},
 		}
 		for _, sys := range systems {
-			dst, err := os.Create(path + "/" + z.lang + "-" + z.version + "-" + sys.system + ".png")
+			dst, err := os.Create(path + "/" + rip.lang + "-" + rip.version + "-" + sys.system + ".png")
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				continue
 			}
-			montage(z, dst, sys.palette, sys.system)
+			montage(rip, dst, sys.palette, sys.system)
 			dst.Close()
 		}
 		f.Close()
 	}
 }
 
-func montage(z *ripper, w io.Writer, pal color.Palette, sys string) {
+func montage(rip *Ripper, w io.Writer, pal color.Palette, sys string) {
 	b := image.Rect(0, 0, 56*15, 56*((151+14)/15))
 	var m draw.Image
 	if pal != nil {
 		m = image.NewPaletted(b, pal)
 	} else {
 		//m = image.NewNRGBA(b)
-		//bg := image.NewUniform(z.SpritePalette(1, "sgb")[0])
+		//bg := image.NewUniform(rip.PokemonPalette(1, "sgb")[0])
 		//draw.Draw(m, m.Bounds(), bg, image.ZP, draw.Src)
-		m = image.NewPaletted(b, z.CombinedPalette(sys))
+		m = image.NewPaletted(b, rip.CombinedPalette(sys))
 	}
 	tile := image.Rect(0, 0, 56, 56)
 	for i := 0; i < 151; i++ {
-		spr, err := z.Sprite(i + 1)
+		p, err := rip.Pokemon(i + 1)
 		if err != nil {
 			log.Printf("error getting pokemon %d: %v", i+1, err)
 		}
-		p := spr.(*image.Paletted)
 		if pal != nil {
 			p.Palette = pal
 		} else {
-			p.Palette = z.SpritePalette(i+1, sys)
+			p.Palette = rip.PokemonPalette(i+1, sys)
 		}
 		padding := tile.Size().Sub(p.Rect.Size()).Div(2)
 		p.Rect = p.Rect.Add(padding)
@@ -703,7 +702,7 @@ func montage(z *ripper, w io.Writer, pal color.Palette, sys string) {
 		col := i % 15
 		draw.Draw(m, tile.Add(image.Pt(col, row).Mul(56)), p, image.ZP, draw.Src)
 	}
-	/*if p, ok := m.(*image.Paletted); ok {
+	/*if p, ok := m; ok {
 		muteColors2(p.Palette)
 	}*/
 	sBIT := 5
