@@ -48,7 +48,7 @@ var (
 var UnownForms = []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"}
 
 // Decode a GSC image of dimensions w*8 x h*8.
-func Decode(reader io.Reader, w, h int) (*image.Paletted, error) {
+func DecodeGSC(reader io.Reader, w, h int) (*image.Paletted, error) {
 	data, err := decodeTiles(newByteReader(reader), w*h*8*2*2)
 	if err != nil {
 		return nil, err
@@ -178,18 +178,6 @@ func reverse(b byte) byte {
 	return b
 }
 
-func mingle(x, y uint16) uint16 {
-	x = (x | x<<4) & 0x0F0F
-	x = (x | x<<2) & 0x3333
-	x = (x | x<<1) & 0x5555
-
-	y = (y | y<<4) & 0x0F0F
-	y = (y | y<<2) & 0x3333
-	y = (y | y<<1) & 0x5555
-
-	return x | y<<1
-}
-
 type romInfo struct {
 	Title                string
 	Version              string
@@ -272,7 +260,7 @@ type Ripper struct {
 	info romInfo
 }
 
-func NewRipper(r Reader) (_ *Ripper, err error) {
+func NewRipper(r Reader) (*Ripper, error) {
 	rip := new(Ripper)
 	rip.r = r
 	rip.buf = newBufferedReader(r)
@@ -397,16 +385,6 @@ func ripPalette(r io.ReaderAt, off int64, n int) color.Palette {
 	}
 }
 
-type RGB15 uint16
-
-func (rgb RGB15) RGBA() (r, g, b, a uint32) {
-	r = (uint32(rgb>>0&31)*0xFFFF + 15) / 31
-	g = (uint32(rgb>>5&31)*0xFFFF + 15) / 31
-	b = (uint32(rgb>>10&31)*0xFFFF + 15) / 31
-	a = 0xFFFF
-	return
-}
-
 func (rip *Ripper) Pokemon(number int) (m *image.Paletted, err error) {
 	if 1 > number || number > MaxPokemon {
 		return nil, ErrNoSuchPokemon
@@ -416,7 +394,7 @@ func (rip *Ripper) Pokemon(number int) (m *image.Paletted, err error) {
 	pal := rip.pokemonPalette(number, normal)
 	//log.Printf("Ripping sprite %d, size %dx%d, offset %x", number, w, h, off)
 	rip.buf.Seek(off, 0)
-	m, err = Decode(rip.buf, w, h)
+	m, err = DecodeGSC(rip.buf, w, h)
 	if m != nil {
 		m.Palette = pal
 	}
@@ -431,7 +409,7 @@ func (rip *Ripper) PokemonBack(number int) (m *image.Paletted, err error) {
 	off := rip.pokemonOffset(number, 0, back)
 	pal := rip.pokemonPalette(number, normal)
 	rip.buf.Seek(off, 0)
-	m, err = Decode(rip.buf, w, h)
+	m, err = DecodeGSC(rip.buf, w, h)
 	if m != nil {
 		m.Palette = pal
 	}
@@ -447,7 +425,7 @@ func (rip *Ripper) Unown(form string) (m *image.Paletted, err error) {
 	off := rip.pokemonOffset(201, formi, front)
 	pal := rip.pokemonPalette(201, normal)
 	rip.buf.Seek(off, 0)
-	m, err = Decode(rip.buf, w, h)
+	m, err = DecodeGSC(rip.buf, w, h)
 	if m != nil {
 		m.Palette = pal
 	}
@@ -463,7 +441,7 @@ func (rip *Ripper) UnownBack(form string) (m *image.Paletted, err error) {
 	off := rip.pokemonOffset(201, formi, back)
 	pal := rip.pokemonPalette(201, normal)
 	rip.buf.Seek(off, 0)
-	m, err = Decode(rip.buf, w, h)
+	m, err = DecodeGSC(rip.buf, w, h)
 	if m != nil {
 		m.Palette = pal
 	}
@@ -478,7 +456,7 @@ func (rip *Ripper) Trainer(number int) (m *image.Paletted, err error) {
 	off := rip.farPointer(rip.info.TrainerOffset, number-1)
 	pal := rip.trainerPalette(number - 1)
 	rip.buf.Seek(off, 0)
-	m, err = Decode(rip.buf, w, h)
+	m, err = DecodeGSC(rip.buf, w, h)
 	if m != nil {
 		m.Palette = pal
 	}

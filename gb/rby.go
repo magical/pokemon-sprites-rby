@@ -1,5 +1,3 @@
-// +build ignore
-
 package gb
 
 import (
@@ -13,11 +11,11 @@ import (
 	"log"
 	"os"
 
+	"github.com/magical/png"
+
 	"image"
 	"image/color"
 	"image/draw"
-
-	"github.com/magical/png"
 )
 
 /*
@@ -87,7 +85,7 @@ func (br *bitReader) Err() error {
 
 // Decode reads a compressed pokemon image and returns it as an
 // image.Paletted.
-func Decode(reader io.Reader) (*image.Paletted, error) {
+func DecodeRBY(reader io.Reader) (*image.Paletted, error) {
 	r := &bitReader{r: bufio.NewReader(reader)}
 
 	width := int(r.ReadBits(4))
@@ -227,7 +225,7 @@ var (
 
 var fakeGbcPalettes []color.Palette
 
-type Ripper struct {
+type RBYRipper struct {
 	f         *os.File
 	lang      string
 	version   string
@@ -240,8 +238,8 @@ type Ripper struct {
 	cgbPalettes   []color.Palette
 }
 
-func newRipper(f *os.File) (*Ripper, error) {
-	rip := new(Ripper)
+func newRipper(f *os.File) (*RBYRipper, error) {
+	rip := new(RBYRipper)
 	rip.f = f
 
 	rom, err := ioutil.ReadAll(f)
@@ -390,13 +388,13 @@ func (rgb RGB15) RGBA() (r, g, b, a uint32) {
 	return
 }
 
-func (rip *Ripper) Pokemon(n int) (*image.Paletted, error) {
+func (rip *RBYRipper) Pokemon(n int) (*image.Paletted, error) {
 	ptr := rip.spritePos[n-1].front
 	rip.f.Seek(ptr, 0)
-	return Decode(rip.f)
+	return DecodeRBY(rip.f)
 }
 
-func (rip *Ripper) PokemonPalette(n int, sys string) color.Palette {
+func (rip *RBYRipper) PokemonPalette(n int, sys string) color.Palette {
 	pi := rip.spritePalette[n-1]
 	if sys == "sgb" {
 		return rip.sgbPalettes[pi]
@@ -407,7 +405,7 @@ func (rip *Ripper) PokemonPalette(n int, sys string) color.Palette {
 	return rip.cgbPalettes[pi]
 }
 
-func (rip *Ripper) CombinedPalette(sys string) (p color.Palette) {
+func (rip *RBYRipper) CombinedPalette(sys string) (p color.Palette) {
 	var palettes []color.Palette
 	if sys == "sgb" {
 		palettes = rip.sgbPalettes[16:26]
@@ -455,6 +453,7 @@ func getBankRBY(n int) int {
 	}
 }
 
+// GrayPalette is a simple linear grayscale palette.
 var grayPalette = color.Palette{
 	color.Gray{255},
 	color.Gray{170},
@@ -483,6 +482,7 @@ var gbDarkBrownPalette = color.Palette{
 	color.NRGBA{R: 0x5a, G: 0x31, B: 0x8, A: 0xff},
 }
 
+// gbPokemonRedPalette is the default GBC palette for Pokemon Red.
 var gbPokemonRedPalette = color.Palette{
 	color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff},
 	color.NRGBA{R: 0xff, G: 0x84, B: 0x84, A: 0xff},
@@ -493,6 +493,7 @@ var gbPokemonRedPalette = color.Palette{
 //{color.NRGBA{R:0xff, G:0xff, B:0xff, A:0xff}, color.NRGBA{R:0x7b, G:0xff, B:0x31, A:0xff}, color.NRGBA{R:0x0, G:0x84, B:0x0, A:0xff}, color.NRGBA{R:0x0, G:0x0, B:0x0, A:0xff}},
 //{color.NRGBA{R:0xff, G:0xff, B:0xff, A:0xff}, color.NRGBA{R:0xff, G:0x84, B:0x84, A:0xff}, color.NRGBA{R:0x94, G:0x3a, B:0x3a, A:0xff}, color.NRGBA{R:0x0, G:0x0, B:0x0, A:0xff}},
 
+// gbPokemonGreenPalette is the default GBC palette for Pokemon Green.
 var gbPokemonGreenPalette = color.Palette{
 	color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff},
 	color.NRGBA{R: 0x7b, G: 0xff, B: 0x31, A: 0xff},
@@ -503,6 +504,7 @@ var gbPokemonGreenPalette = color.Palette{
 //{color.NRGBA{R:0xff, G:0xff, B:0xff, A:0xff}, color.NRGBA{R:0xff, G:0x84, B:0x84, A:0xff}, color.NRGBA{R:0x94, G:0x3a, B:0x3a, A:0xff}, color.NRGBA{R:0x0, G:0x0, B:0x0, A:0xff}},
 //{color.NRGBA{R:0xff, G:0xff, B:0xff, A:0xff}, color.NRGBA{R:0x7b, G:0xff, B:0x31, A:0xff}, color.NRGBA{R:0x0, G:0x63, B:0xc5, A:0xff}, color.NRGBA{R:0x0, G:0x0, B:0x0, A:0xff}},
 
+// gbPokemonBluePalette is the default GBC palette for Pokemon Blue.
 var gbPokemonBluePalette = color.Palette{
 	color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff},
 	color.NRGBA{R: 0x63, G: 0xa5, B: 0xff, A: 0xff},
@@ -513,6 +515,7 @@ var gbPokemonBluePalette = color.Palette{
 //{color.NRGBA{R:0xff, G:0xff, B:0xff, A:0xff}, color.NRGBA{R:0xff, G:0x84, B:0x84, A:0xff}, color.NRGBA{R:0x94, G:0x3a, B:0x3a, A:0xff}, color.NRGBA{R:0x0, G:0x0, B:0x0, A:0xff}},
 //{color.NRGBA{R:0xff, G:0xff, B:0xff, A:0xff}, color.NRGBA{R:0x63, G:0xa5, B:0xff, A:0xff}, color.NRGBA{R:0x0, G:0x0, B:0xff, A:0xff}, color.NRGBA{R:0x0, G:0x0, B:0x0, A:0xff}},
 
+// gbPokemonYellowPalette is the default GBC palette for Pokemon Yellow (Japanese).
 var gbPokemonYellowPalette = color.Palette{
 	color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff},
 	color.NRGBA{R: 0xff, G: 0xff, B: 0x0, A: 0xff},
@@ -646,7 +649,7 @@ func main() {
 	}
 }
 
-func montage(rip *Ripper, w io.Writer, pal color.Palette, sys string) {
+func montage(rip *RBYRipper, w io.Writer, pal color.Palette, sys string) {
 	b := image.Rect(0, 0, 56*15, 56*((151+14)/15))
 	var m draw.Image
 	if pal != nil {
