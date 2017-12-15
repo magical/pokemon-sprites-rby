@@ -9,8 +9,6 @@ import (
 	"image/color"
 	"image/gif"
 	"io"
-	//"log"
-	"strings"
 )
 
 /*
@@ -271,12 +269,12 @@ func NewRipper(r Reader) (*Ripper, error) {
 		return nil, err
 	}
 
-	var header [0x150]byte
-	r.ReadAt(header[:], 0)
-	title := string(header[0x134:0x13F])
-	title = strings.TrimRight(title, "\x00")
+	h, err := readHeader(r)
+	if err != nil {
+		return nil, err
+	}
 
-	info, ok := romtab[title]
+	info, ok := romtab[h.Title]
 	if !ok {
 		return nil, errors.New("Couldn't recognize ROM")
 	}

@@ -236,46 +236,27 @@ type RBYRipper struct {
 	spritePalette [151]byte
 	sgbPalettes   []color.Palette
 	cgbPalettes   []color.Palette
+	header        Header
 }
 
 func newRipper(f *os.File) (*RBYRipper, error) {
 	rip := new(RBYRipper)
 	rip.f = f
 
+	h, err := readHeader(f)
+	if err != nil {
+		return nil, err
+	}
+	rip.header = h
+
 	rom, err := ioutil.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}
 
-	header := rom[:0x150]
-	title := string(bytes.TrimRight(header[0x134:0x143], "\x00"))
-	hasCGB := rom[0x143] == 0x80
-	hasSGB := rom[0x146] == 3
-	isJP := rom[0x14A] == 0
-
-	_ = hasCGB
-	_ = hasSGB
-
 	getBank := getBankRBY
-	if isJP && (title == "POKEMON RED" || title == "POKEMON GREEN") {
+	if h.Lang == "jp" && (h.Title == "POKEMON RED" || h.Title == "POKEMON GREEN") {
 		getBank = getBankRG
-	}
-
-	switch title {
-	case "POKEMON RED":
-		rip.version = "red"
-	case "POKEMON GREEN":
-		rip.version = "green"
-	case "POKEMON BLUE":
-		rip.version = "blue"
-	case "POKEMON YELLOW":
-		rip.version = "yellow"
-	}
-
-	if isJP {
-		rip.lang = "jp"
-	} else {
-		rip.lang = "en"
 	}
 
 	// Read pokedex order
@@ -285,7 +266,8 @@ func newRipper(f *os.File) (*RBYRipper, error) {
 	}
 
 	internalId := make(map[int]int)
-	for i, n := range rom[pos : pos+0xbe] {
+	const pokedexOrderLength = 190
+	for i, n := range rom[pos : pos+190] {
 		if n != 0 {
 			internalId[int(n)] = i + 1
 		}
@@ -361,7 +343,7 @@ func newRipper(f *os.File) (*RBYRipper, error) {
 		}
 		rip.sgbPalettes = append(rip.sgbPalettes, cp[:])
 	}
-	if hasCGB {
+	if h.HasCGB {
 		err = binary.Read(r, binary.LittleEndian, &palettes)
 		if err != nil {
 			return nil, err
@@ -376,6 +358,64 @@ func newRipper(f *os.File) (*RBYRipper, error) {
 	}
 
 	return rip, nil
+}
+
+type Header struct {
+	Title   string // Game title from ROM: POKEMON_RED, etc
+	Version string // Version identifier: red, blue, etc
+	Lang    string // Game language: en, jp
+	HasSGB  bool   // Game has Super Gameboy support
+	HasCGB  bool   // Game has Gameboy Color support
+}
+
+func readHeader(r io.ReaderAt) (Header, error) {
+	var header [0x150]byte
+
+	if _, err := r.ReadAt(header[:], 0); err != nil {
+		return Header{}, err
+	}
+
+	hasCGB := header[0x143] >= 0x80
+	hasSGB := header[0x146] == 3
+	isJP := header[0x14A] == 0
+
+	var title string
+	// In *some* GBC games (like GSC), the last four bytes are a
+	// manufacturer code. I don't know of a reliable way to detect this,
+	// so let's just say that if the last byte of the title is not \x00
+	// then it must be a manufacturer code.
+	if hasCGB && header[0x142] != '\x00' {
+		title = string(bytes.TrimRight(header[0x134:0x143-4], "\x00"))
+	} else {
+		title = string(bytes.TrimRight(header[0x134:0x143], "\x00"))
+	}
+
+	version := "unknown"
+	switch title {
+	case "POKEMON RED":
+		version = "red"
+	case "POKEMON GREEN":
+		version = "green"
+	case "POKEMON BLUE":
+		version = "blue"
+	case "POKEMON YELLOW":
+		version = "yellow"
+	}
+
+	lang := "en"
+	if isJP {
+		lang = "jp"
+	}
+
+	h := Header{
+		Title:   title,
+		Version: version,
+		Lang:    lang,
+		HasCGB:  hasCGB,
+		HasSGB:  hasSGB,
+	}
+
+	return h, nil
 }
 
 type RGB15 uint16
@@ -422,7 +462,8 @@ func (rip *RBYRipper) CombinedPalette(sys string) (p color.Palette) {
 	return
 }
 
-// GetBankRG returns the bank containg the graphics for pokemon n.
+// GetBankRG returns the bank containing the graphics for pokemon n
+// in Japanese R/G.
 func getBankRG(n int) int {
 	switch {
 	case n < 0x1f:
@@ -438,6 +479,8 @@ func getBankRG(n int) int {
 	}
 }
 
+// GetBankRBY returns the bank containing the graphics for pokemon n
+// in the R/B/Y.
 func getBankRBY(n int) int {
 	switch {
 	case n < 0x1f:
