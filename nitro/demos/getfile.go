@@ -1,11 +1,14 @@
+// +build ignore
+
 package main
 
 import (
 	"fmt"
-	"github.com/magical/sprites/nitro"
 	"io"
 	"os"
 	"strconv"
+
+	"github.com/magical/sprites/nitro"
 )
 
 func main() {
