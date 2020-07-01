@@ -33,6 +33,8 @@ type Animation struct {
 	big    []image.Image     // cache of 8x cells
 	bounds []image.Rectangle // cache of cell bounds
 	state  []state           // state of animated cells
+
+	previousCell int
 }
 
 // State represents the current state of an animated cell
@@ -117,7 +119,13 @@ func (a *Animation) renderMAcell(dst draw.Image, dp image.Point, c Acell, t int)
 		ScaleY: float64(f.ScaleY) / 4096,
 	}
 	if f.Cell < a.nmcr.Len() {
+		if f.Cell != a.previousCell {
+			for i := range a.state {
+				a.state[i].reset(&a.nanr.Cells[i])
+			}
+		}
 		a.renderMcell(dst, dp, a.nmcr.Mcell(f.Cell), tr, t)
+		a.previousCell = f.Cell
 	}
 }
 
@@ -307,6 +315,7 @@ func (a *Animation) Render() *gif.GIF {
 	for _, f := range a.nmar.Cells[0].Frames {
 		total += f.Duration
 	}
+	a.previousCell = -1
 	for i := range a.state {
 		a.state[i].reset(&a.nanr.Cells[i])
 	}
