@@ -35,7 +35,8 @@ func main() {
 		die(err)
 	}
 	base := int(poke) * 20
-	ncgr, err := narc.OpenNCGR(base + 2)
+	dir := 9 // 0 for fontsprite, 9 for backsprite
+	ncgr, err := narc.OpenNCGR(base + dir + 2)
 	if err != nil {
 		die("OpenNCGR:", err)
 	}
@@ -43,19 +44,19 @@ func main() {
 	if err != nil {
 		die("OpenNCLR:", err)
 	}
-	ncer, err := narc.OpenNCER(base + 4)
+	ncer, err := narc.OpenNCER(base + dir + 4)
 	if err != nil {
 		die("OpenNCER:", err)
 	}
-	nanr, err := narc.OpenNANR(base + 5)
+	nanr, err := narc.OpenNANR(base + dir + 5)
 	if err != nil {
 		die("OpenNANR:", err)
 	}
-	nmcr, err := narc.OpenNMCR(base + 6)
+	nmcr, err := narc.OpenNMCR(base + dir + 6)
 	if err != nil {
 		die("OpenNMCR:", err)
 	}
-	nmar, err := narc.OpenNMAR(base + 7)
+	nmar, err := narc.OpenNMAR(base + dir + 7)
 	if err != nil {
 		die("OpenNMAR:", err)
 	}
