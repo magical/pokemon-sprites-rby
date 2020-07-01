@@ -43,7 +43,7 @@ func TestScale2x(t *testing.T) {
 		for y := r.Min.Y; y < r.Max.Y; y++ {
 			for x := r.Min.X; x < r.Max.X; x++ {
 				if !equal(actual.At(x, y), golden.At(x, y)) {
-					t.Fatalf("%T: pix at (%v,%v): got %v, want %v", actual, actual.At(x, y), golden.At(x, y))
+					t.Fatalf("%T: pix at (%v,%v): got %v, want %v", actual, x, y, actual.At(x, y), golden.At(x, y))
 				}
 			}
 		}
